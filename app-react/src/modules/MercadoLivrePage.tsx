@@ -12,7 +12,7 @@ type OrderItem = {
   id?: string;
   title?: string;
   quantity?: number; 
-  unit_price?: number;
+  unit_price?: number; 
   seller_sku?: string; 
   thumbnail?: string; 
   sale_fee?: number;
