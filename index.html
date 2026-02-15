@@ -600,6 +600,28 @@
             c.appendChild(d); if(qty && unitCost) d.querySelector('.material-cost').value = (parseFloat(qty) * parseFloat(unitCost)).toFixed(2); calcStep1(); 
         }
 
+        function getKitQty() { const el = document.getElementById('kitQtyInput'); const qty = Math.floor(el ? normalizeCurrency(el.value) : 1); return qty > 0 ? qty : 1; }
+        function setKitQtyValue(v = 1) { const el = document.getElementById('kitQtyInput'); if(!el) return; const qty = Math.max(1, Math.floor(Number(v) || 1)); el.value = qty; }
+        function ensureKitPricingUI() {
+            if (document.getElementById('kitQtyInput')) return;
+            const title = document.getElementById('pricingTitle');
+            if (!title) return;
+            const box = document.createElement('div');
+            box.className = 'mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3';
+            box.innerHTML = `<div class="text-xs font-bold text-amber-800 mb-1">Precificação por Kit</div><div class="flex items-center gap-2"><label for="kitQtyInput" class="text-sm text-gray-700">Qtd do kit:</label><input type="number" id="kitQtyInput" min="1" step="1" value="1" class="border p-2 w-24 rounded" oninput="handleKitQtyChange()"><span class="text-xs text-gray-500">Ex: 15 calendários</span></div>`;
+            title.parentElement?.insertAdjacentElement('afterend', box);
+        }
+        function handleKitQtyChange() {
+            const el = document.getElementById('kitQtyInput');
+            if (el) {
+                const qty = Math.max(1, Math.floor(normalizeCurrency(el.value) || 1));
+                el.value = qty;
+            }
+            calcResumoCusto();
+            calcPriceSuggestion();
+            calcRealMargin();
+            document.querySelectorAll('.sim-price-input').forEach(input => recalcSimRow(input));
+        }
         function calcMaterialRow(el) { const row = el.closest('.material-row'); const q = normalizeCurrency(row.querySelector('.material-qty').value); const u = normalizeCurrency(row.querySelector('.material-unit-cost').value); const t = q * u; const ci = row.querySelector('.material-cost'); if(ci) ci.value = t.toFixed(2); calcStep1(); }
         function calcStep1() { let t = 0; document.querySelectorAll('.material-cost').forEach(e => t += Number(e.value)); document.getElementById('totalMateriais').innerText = fmt(t); return t; }
         function nextStep(n) { if (n === 4) calcResumoCusto(); if (n === 5) calcPriceSuggestion(); if (n === 6) renderSimulatorTable(); showStep(n); }
@@ -608,9 +630,29 @@
         function calcLaborHour() { const s=normalizeCurrency(document.getElementById('inputSalario').value), h=normalizeCurrency(document.getElementById('inputHorasMes').value)||160; return h>0?s/h:0; }
         function calcStep2() { const t=(calcLaborHour()/60)*normalizeCurrency(document.getElementById('inputTempoProducao').value); document.getElementById('totalMaoObra').innerText = fmt(t); return t; }
         function syncFixedCost(v) { document.getElementById('rangeCustosFixos').value = v; document.getElementById('inputCustosFixos').value = v; document.getElementById('displayCustoFixo').innerText = v+'%'; }
-        function calcResumoCusto() { const mat = calcStep1(), mo = calcStep2(), fp = normalizeCurrency(document.getElementById('inputCustosFixos').value), sub = mat + mo, fv = sub * (fp/100), tot = sub + fv; document.getElementById('resumoCustoTotal').innerHTML = `<div class="flex justify-between py-3 text-lg text-indigo-700 bg-indigo-50 px-4 rounded-lg mt-2"><span>Total:</span> <span class="font-bold">${fmt(tot)}</span></div>`; return tot; }
+        function calcResumoCusto() {
+            const matUnit = calcStep1();
+            const moUnit = calcStep2();
+            const fp = normalizeCurrency(document.getElementById('inputCustosFixos').value);
+            const kitQty = getKitQty();
+            const subUnit = matUnit + moUnit;
+            const unitWithFixed = subUnit + (subUnit * (fp / 100));
+            const tot = unitWithFixed * kitQty;
+            const detail = kitQty > 1 ? `<div class="text-xs text-gray-500 mt-1">${fmt(unitWithFixed)} por unidade x ${kitQty} = ${fmt(tot)}</div>` : '';
+            document.getElementById('resumoCustoTotal').innerHTML = `<div class="py-3 text-lg text-indigo-700 bg-indigo-50 px-4 rounded-lg mt-2"><div class="flex justify-between"><span>Total:</span> <span class="font-bold">${fmt(tot)}</span></div>${detail}</div>`;
+            return tot;
+        }
         function calcPriceSuggestion() { const c = calcResumoCusto(), m = normalizeCurrency(document.getElementById('margemLucroInput').value), p = m < 100 ? c / (1 - (m/100)) : 0; document.getElementById('sugestaoPreco').innerHTML = `<b>${fmt(p)}</b>`; return p; }
-        function calcRealMargin() { const c = calcResumoCusto(), v = normalizeCurrency(document.getElementById('precoVendaFinalInput').value); if(v<=0) return; const l=v-c, m=(l/v)*100; document.getElementById('lucroBrutoPct').innerHTML = `<b>${m.toFixed(2)}%</b>`; const val = v - c; document.getElementById('lucroBrutoValor').innerHTML = `<span class="text-xs text-gray-500">Lucro R$: ${fmt(val)}</span>`; }
+        function calcRealMargin() {
+            const c = calcResumoCusto(), v = normalizeCurrency(document.getElementById('precoVendaFinalInput').value);
+            if(v<=0) return;
+            const l = v - c;
+            const m = (l / v) * 100;
+            const kitQty = getKitQty();
+            const perUnit = kitQty > 1 ? ` | ${fmt(l / kitQty)}/un` : '';
+            document.getElementById('lucroBrutoPct').innerHTML = `<b>${m.toFixed(2)}%</b>`;
+            document.getElementById('lucroBrutoValor').innerHTML = `<span class="text-xs text-gray-500">Lucro R$: ${fmt(l)}${perUnit}</span>`;
+        }
 
         function rotatePreview(degrees) {
             const img = document.getElementById('calendarPreviewImage');
@@ -634,7 +676,7 @@
         function exportPaidOrdersToCSV() { const paid = globalOrdersCache.filter(o => o.status === 'Pago' || o.status === 'paid'); if(paid.length === 0) return alert("Sem pedidos pagos para exportar."); const csv = Papa.unparse(paid); const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'}); const link = document.createElement("a"); const url = URL.createObjectURL(blob); link.setAttribute("href", url); link.setAttribute("download", "pedidos_pagos.csv"); link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link); }
 
         function initApp() { hideAuthModal(); const app = document.getElementById('appContainer'); if(app) app.classList.remove('hidden'); if(document.getElementById('userDisplay')) document.getElementById('userDisplay').innerText = currentUser?.email || '...'; addMaterialRow(); if(typeof loadGlobalMockupConfig === 'function') loadGlobalMockupConfig(); if(typeof loadOrderFeeConfig === 'function') loadOrderFeeConfig(); loadMaterialsLibrary(); switchModule('dashboard'); }
-        function switchModule(m) { ['dashboard', 'pricing', 'calendar', 'settings'].forEach(x => { const el = document.getElementById(`module-${x}`); if(el) el.classList.add('hidden'); }); const target = document.getElementById(`module-${m}`); if(target) target.classList.remove('hidden'); document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active')); const nav = document.getElementById(`nav-${m}`); if(nav) nav.classList.add('active'); if (m === 'dashboard') loadDashboardData(); if (m === 'calendar') { if(typeof loadGlobalMockupConfig === 'function') loadGlobalMockupConfig(); loadCalendarOrders(); } if (m === 'pricing') { loadMaterialsLibrary(); } if (m === 'settings') { if(typeof loadOrderFeeConfig === 'function') loadOrderFeeConfig(true); } if (window.innerWidth < 768) { const sidebar = document.getElementById('sidebar'); const overlay = document.getElementById('mobileMenuOverlay'); if(sidebar && !sidebar.classList.contains('-translate-x-full')) { sidebar.classList.add('-translate-x-full'); if(overlay) overlay.classList.add('hidden'); } } }
+        function switchModule(m) { ['dashboard', 'pricing', 'calendar', 'settings'].forEach(x => { const el = document.getElementById(`module-${x}`); if(el) el.classList.add('hidden'); }); const target = document.getElementById(`module-${m}`); if(target) target.classList.remove('hidden'); document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active')); const nav = document.getElementById(`nav-${m}`); if(nav) nav.classList.add('active'); if (m === 'dashboard') loadDashboardData(); if (m === 'calendar') { if(typeof loadGlobalMockupConfig === 'function') loadGlobalMockupConfig(); loadCalendarOrders(); } if (m === 'pricing') { loadMaterialsLibrary(); ensureKitPricingUI(); } if (m === 'settings') { if(typeof loadOrderFeeConfig === 'function') loadOrderFeeConfig(true); } if (window.innerWidth < 768) { const sidebar = document.getElementById('sidebar'); const overlay = document.getElementById('mobileMenuOverlay'); if(sidebar && !sidebar.classList.contains('-translate-x-full')) { sidebar.classList.add('-translate-x-full'); if(overlay) overlay.classList.add('hidden'); } } }
         function toggleMobileMenu() { const sidebar = document.getElementById('sidebar'); const overlay = document.getElementById('mobileMenuOverlay'); if (!sidebar || !overlay) return; const isOpen = !sidebar.classList.contains('-translate-x-full'); if (isOpen) { sidebar.classList.add('-translate-x-full'); overlay.classList.add('hidden'); } else { sidebar.classList.remove('-translate-x-full'); overlay.classList.remove('hidden'); } }
 
         async function loadCalendarOrders() { 
@@ -1273,15 +1315,15 @@
                  existingHistory.push({ date: new Date().toISOString(), type: 'creation', msg: 'Produto criado' });
              }
 
-             const baseProd = { user_id: currentUser.id, product_name: name, product_image_data: img, selling_price: mainPrice, base_cost: totalCost, final_margin: marginBase, materials_json: JSON.stringify({ version: 2, materials: materialsList, strategies: strategies, history: existingHistory }) }; 
+             const baseProd = { user_id: currentUser.id, product_name: name, product_image_data: img, selling_price: mainPrice, base_cost: totalCost, final_margin: marginBase, materials_json: JSON.stringify({ version: 2, materials: materialsList, strategies: strategies, history: existingHistory, kit_qty: getKitQty() }) }; 
              
              if(editingProductId) { await supabaseClient.from('pricing_products').update(baseProd).eq('id', editingProductId); alert("Atualizado!"); } 
              else { await supabaseClient.from('pricing_products').insert([{ ...baseProd, created_at: new Date().toISOString() }]); alert("Salvo!"); } 
              cancelEditProduct(); openProductsModal(); 
         }
 
-        function startEditProduct(id) { const product = currentProductsList.find(p => String(p.id) === String(id)); if (!product) return; editingProductId = id; document.getElementById('productsModal').classList.add('hidden'); switchModule('pricing'); document.getElementById('productNameInput').value = product.product_name || ''; document.getElementById('productImageBase64Input').value = product.product_image_data || ''; if(product.product_image_data) { document.getElementById('productImagePreview').src = product.product_image_data; document.getElementById('productImagePreviewContainer').classList.remove('hidden'); } document.getElementById('materialsList').innerHTML = ''; currentEditingStrategies = []; try { const parsed = JSON.parse(product.materials_json || '{}'); if(parsed.materials) parsed.materials.forEach(m => addMaterialRow(m.name, m.qty, m.unit_cost, m.cost)); currentEditingStrategies = parsed.strategies || []; } catch(e) { addMaterialRow(); } document.getElementById('margemLucroInput').value = product.final_margin || ''; document.getElementById('precoVendaFinalInput').value = product.selling_price || ''; calcStep1(); calcResumoCusto(); calcPriceSuggestion(); if(product.selling_price) calcRealMargin(); nextStep(6); document.getElementById('btnSaveProduct').innerText = "Salvar Alterações"; document.getElementById('btnCancelEditProduct').classList.remove('hidden'); }
-        function cancelEditProduct() { editingProductId = null; currentEditingStrategies = []; document.getElementById('btnCancelEditProduct').classList.add('hidden'); document.getElementById('btnSaveProduct').innerText = "Salvar Produto"; document.getElementById('productNameInput').value = ''; clearProductImage(); document.getElementById('materialsList').innerHTML = ''; addMaterialRow(); document.getElementById('margemLucroInput').value = ''; document.getElementById('precoVendaFinalInput').value = ''; document.getElementById('sugestaoPreco').innerText = ''; calcStep1(); calcResumoCusto(); nextStep(1); }
+        function startEditProduct(id) { const product = currentProductsList.find(p => String(p.id) === String(id)); if (!product) return; editingProductId = id; document.getElementById('productsModal').classList.add('hidden'); switchModule('pricing'); document.getElementById('productNameInput').value = product.product_name || ''; document.getElementById('productImageBase64Input').value = product.product_image_data || ''; if(product.product_image_data) { document.getElementById('productImagePreview').src = product.product_image_data; document.getElementById('productImagePreviewContainer').classList.remove('hidden'); } document.getElementById('materialsList').innerHTML = ''; currentEditingStrategies = []; try { const parsed = JSON.parse(product.materials_json || '{}'); if(parsed.materials) parsed.materials.forEach(m => addMaterialRow(m.name, m.qty, m.unit_cost, m.cost)); currentEditingStrategies = parsed.strategies || []; setKitQtyValue(parsed.kit_qty || 1); } catch(e) { addMaterialRow(); setKitQtyValue(1); } document.getElementById('margemLucroInput').value = product.final_margin || ''; document.getElementById('precoVendaFinalInput').value = product.selling_price || ''; calcStep1(); calcResumoCusto(); calcPriceSuggestion(); if(product.selling_price) calcRealMargin(); nextStep(6); document.getElementById('btnSaveProduct').innerText = "Salvar Alterações"; document.getElementById('btnCancelEditProduct').classList.remove('hidden'); }
+        function cancelEditProduct() { editingProductId = null; currentEditingStrategies = []; document.getElementById('btnCancelEditProduct').classList.add('hidden'); document.getElementById('btnSaveProduct').innerText = "Salvar Produto"; document.getElementById('productNameInput').value = ''; clearProductImage(); document.getElementById('materialsList').innerHTML = ''; addMaterialRow(); setKitQtyValue(1); document.getElementById('margemLucroInput').value = ''; document.getElementById('precoVendaFinalInput').value = ''; document.getElementById('sugestaoPreco').innerText = ''; calcStep1(); calcResumoCusto(); nextStep(1); }
         async function deleteProduct(id) { if(isOfflineMode) return alert("Modo Offline"); if(confirm("Excluir?")) { await supabaseClient.from('pricing_products').delete().eq('id', id); loadProducts(); } }
         function handleProductImageUpload(f) { resizeToJpegDataUrl(f, 600).then((b64) => { document.getElementById('productImageBase64Input').value = b64; document.getElementById('productImagePreview').src = b64; document.getElementById('productImagePreviewContainer')?.classList.remove('hidden'); }); }
         function clearProductImage() { document.getElementById('productImageBase64Input').value = ''; document.getElementById('productImagePreview').src = ''; document.getElementById('productImagePreviewContainer')?.classList.add('hidden'); }
@@ -1295,7 +1337,21 @@
         function renderSimulatorTable() { const tbody = document.getElementById('marketplaceSimulatorBody'); if(!tbody) return; tbody.innerHTML = ''; const basePrice = normalizeCurrency(document.getElementById('precoVendaFinalInput').value) || normalizeCurrency(document.getElementById('sugestaoPreco').innerText) || calcResumoCusto() * 2; if (currentEditingStrategies && currentEditingStrategies.length > 0) { currentEditingStrategies.forEach(s => { let pct = s.pct, fix = s.fix; if (pct === undefined) { let rule = orderFeeConfig.overrides.find(o => o.id === s.id); if(s.id === 'default') rule = orderFeeConfig.default; pct = rule ? rule.percent : 0; fix = rule ? rule.fixed : 0; } addSimRow(s.id, s.name, pct, fix, s.price); }); } else { loadSimsFromConfig(basePrice); } }
         function loadSimsFromConfig(basePrice = 0) { const tbody = document.getElementById('marketplaceSimulatorBody'); tbody.innerHTML = ''; if(basePrice === 0) basePrice = normalizeCurrency(document.getElementById('precoVendaFinalInput').value) || calcResumoCusto() * 2; addSimRow('default', 'Padrão', orderFeeConfig.default?.percent || 0, orderFeeConfig.default?.fixed || 0, basePrice); if (orderFeeConfig.overrides) { orderFeeConfig.overrides.forEach(m => addSimRow(m.id, m.name, m.percent, m.fixed, basePrice)); } }
         function addSimRow(id='manual', name='Novo', feePct=0, feeFix=0, initialPrice=0) { const tbody = document.getElementById('marketplaceSimulatorBody'); const tr = document.createElement('tr'); tr.className = "hover:bg-gray-50 transition sim-row group"; tr.dataset.id = id === 'manual' ? 'manual_' + Math.random().toString(36).substr(2, 5) : id; tr.innerHTML = ` <td class="p-3"><input type="text" class="font-bold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 outline-none w-full sim-name" value="${name}"></td> <td class="p-3"><div class="flex items-center"><input type="number" class="w-12 p-1 border rounded text-xs sim-pct" value="${feePct}" oninput="recalcSimRow(this)">%</div></td> <td class="p-3"><div class="flex items-center">R$<input type="number" class="w-12 p-1 border rounded text-xs sim-fix" value="${feeFix}" oninput="recalcSimRow(this)"></div></td> <td class="p-3"><div class="flex items-center border rounded bg-white overflow-hidden focus-within:ring-2 ring-indigo-200"><span class="pl-2 text-gray-500 text-xs">R$</span><input type="number" step="0.01" class="w-full p-2 text-sm outline-none font-bold text-gray-700 sim-price-input" value="${Number(initialPrice).toFixed(2)}" oninput="recalcSimRow(this)"></div></td> <td class="p-3 text-right"><div class="font-bold text-lg sim-profit-display">...</div><div class="text-[10px] text-gray-400 sim-margin-display">...</div></td> <td class="p-3 text-right"><button onclick="this.closest('tr').remove()" class="text-gray-300 hover:text-red-500"><i class="fas fa-trash"></i></button></td> `; tbody.appendChild(tr); recalcSimRow(tr.querySelector('.sim-price-input')); }
-        function recalcSimRow(input) { const row = input.closest('tr'); const price = parseFloat(row.querySelector('.sim-price-input').value) || 0; const pct = parseFloat(row.querySelector('.sim-pct').value) || 0; const fix = parseFloat(row.querySelector('.sim-fix').value) || 0; const baseCost = calcResumoCusto(); const totalFee = (price * (pct / 100)) + fix; const profit = price - baseCost - totalFee; const margin = price > 0 ? (profit / price) * 100 : 0; const pEl = row.querySelector('.sim-profit-display'); pEl.innerText = fmt(profit); pEl.className = `font-bold text-lg sim-profit-display ${profit > 0 ? 'text-green-600' : 'text-red-500'}`; row.querySelector('.sim-margin-display').innerText = `${margin.toFixed(1)}% margem`; }
+        function recalcSimRow(input) {
+            const row = input.closest('tr');
+            const price = parseFloat(row.querySelector('.sim-price-input').value) || 0;
+            const pct = parseFloat(row.querySelector('.sim-pct').value) || 0;
+            const fix = parseFloat(row.querySelector('.sim-fix').value) || 0;
+            const baseCost = calcResumoCusto();
+            const totalFee = (price * (pct / 100)) + fix;
+            const profit = price - baseCost - totalFee;
+            const margin = price > 0 ? (profit / price) * 100 : 0;
+            const kitQty = getKitQty();
+            const pEl = row.querySelector('.sim-profit-display');
+            pEl.innerText = fmt(profit);
+            pEl.className = `font-bold text-lg sim-profit-display ${profit > 0 ? 'text-green-600' : 'text-red-500'}`;
+            row.querySelector('.sim-margin-display').innerText = `${margin.toFixed(1)}% margem${kitQty > 1 ? ` | ${fmt(profit / kitQty)}/un` : ''}`;
+        }
 
         // --- INIT ---
         if (typeof bootstrapAuth === 'function') bootstrapAuth();
@@ -1904,6 +1960,28 @@
             c.appendChild(d); if(qty && unitCost) d.querySelector('.material-cost').value = (parseFloat(qty) * parseFloat(unitCost)).toFixed(2); calcStep1(); 
         }
 
+        function getKitQty() { const el = document.getElementById('kitQtyInput'); const qty = Math.floor(el ? normalizeCurrency(el.value) : 1); return qty > 0 ? qty : 1; }
+        function setKitQtyValue(v = 1) { const el = document.getElementById('kitQtyInput'); if(!el) return; const qty = Math.max(1, Math.floor(Number(v) || 1)); el.value = qty; }
+        function ensureKitPricingUI() {
+            if (document.getElementById('kitQtyInput')) return;
+            const title = document.getElementById('pricingTitle');
+            if (!title) return;
+            const box = document.createElement('div');
+            box.className = 'mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3';
+            box.innerHTML = `<div class="text-xs font-bold text-amber-800 mb-1">Precificação por Kit</div><div class="flex items-center gap-2"><label for="kitQtyInput" class="text-sm text-gray-700">Qtd do kit:</label><input type="number" id="kitQtyInput" min="1" step="1" value="1" class="border p-2 w-24 rounded" oninput="handleKitQtyChange()"><span class="text-xs text-gray-500">Ex: 15 calendários</span></div>`;
+            title.parentElement?.insertAdjacentElement('afterend', box);
+        }
+        function handleKitQtyChange() {
+            const el = document.getElementById('kitQtyInput');
+            if (el) {
+                const qty = Math.max(1, Math.floor(normalizeCurrency(el.value) || 1));
+                el.value = qty;
+            }
+            calcResumoCusto();
+            calcPriceSuggestion();
+            calcRealMargin();
+            document.querySelectorAll('.sim-price-input').forEach(input => recalcSimRow(input));
+        }
         function calcMaterialRow(el) { const row = el.closest('.material-row'); const q = normalizeCurrency(row.querySelector('.material-qty').value); const u = normalizeCurrency(row.querySelector('.material-unit-cost').value); const t = q * u; const ci = row.querySelector('.material-cost'); if(ci) ci.value = t.toFixed(2); calcStep1(); }
         function calcStep1() { let t = 0; document.querySelectorAll('.material-cost').forEach(e => t += Number(e.value)); document.getElementById('totalMateriais').innerText = fmt(t); return t; }
         function nextStep(n) { if (n === 4) calcResumoCusto(); if (n === 5) calcPriceSuggestion(); if (n === 6) renderSimulatorTable(); showStep(n); }
@@ -1912,9 +1990,29 @@
         function calcLaborHour() { const s=normalizeCurrency(document.getElementById('inputSalario').value), h=normalizeCurrency(document.getElementById('inputHorasMes').value)||160; return h>0?s/h:0; }
         function calcStep2() { const t=(calcLaborHour()/60)*normalizeCurrency(document.getElementById('inputTempoProducao').value); document.getElementById('totalMaoObra').innerText = fmt(t); return t; }
         function syncFixedCost(v) { document.getElementById('rangeCustosFixos').value = v; document.getElementById('inputCustosFixos').value = v; document.getElementById('displayCustoFixo').innerText = v+'%'; }
-        function calcResumoCusto() { const mat = calcStep1(), mo = calcStep2(), fp = normalizeCurrency(document.getElementById('inputCustosFixos').value), sub = mat + mo, fv = sub * (fp/100), tot = sub + fv; document.getElementById('resumoCustoTotal').innerHTML = `<div class="flex justify-between py-3 text-lg text-indigo-700 bg-indigo-50 px-4 rounded-lg mt-2"><span>Total:</span> <span class="font-bold">${fmt(tot)}</span></div>`; return tot; }
+        function calcResumoCusto() {
+            const matUnit = calcStep1();
+            const moUnit = calcStep2();
+            const fp = normalizeCurrency(document.getElementById('inputCustosFixos').value);
+            const kitQty = getKitQty();
+            const subUnit = matUnit + moUnit;
+            const unitWithFixed = subUnit + (subUnit * (fp / 100));
+            const tot = unitWithFixed * kitQty;
+            const detail = kitQty > 1 ? `<div class="text-xs text-gray-500 mt-1">${fmt(unitWithFixed)} por unidade x ${kitQty} = ${fmt(tot)}</div>` : '';
+            document.getElementById('resumoCustoTotal').innerHTML = `<div class="py-3 text-lg text-indigo-700 bg-indigo-50 px-4 rounded-lg mt-2"><div class="flex justify-between"><span>Total:</span> <span class="font-bold">${fmt(tot)}</span></div>${detail}</div>`;
+            return tot;
+        }
         function calcPriceSuggestion() { const c = calcResumoCusto(), m = normalizeCurrency(document.getElementById('margemLucroInput').value), p = m < 100 ? c / (1 - (m/100)) : 0; document.getElementById('sugestaoPreco').innerHTML = `<b>${fmt(p)}</b>`; return p; }
-        function calcRealMargin() { const c = calcResumoCusto(), v = normalizeCurrency(document.getElementById('precoVendaFinalInput').value); if(v<=0) return; const l=v-c, m=(l/v)*100; document.getElementById('lucroBrutoPct').innerHTML = `<b>${m.toFixed(2)}%</b>`; const val = v - c; document.getElementById('lucroBrutoValor').innerHTML = `<span class="text-xs text-gray-500">Lucro R$: ${fmt(val)}</span>`; }
+        function calcRealMargin() {
+            const c = calcResumoCusto(), v = normalizeCurrency(document.getElementById('precoVendaFinalInput').value);
+            if(v<=0) return;
+            const l = v - c;
+            const m = (l / v) * 100;
+            const kitQty = getKitQty();
+            const perUnit = kitQty > 1 ? ` | ${fmt(l / kitQty)}/un` : '';
+            document.getElementById('lucroBrutoPct').innerHTML = `<b>${m.toFixed(2)}%</b>`;
+            document.getElementById('lucroBrutoValor').innerHTML = `<span class="text-xs text-gray-500">Lucro R$: ${fmt(l)}${perUnit}</span>`;
+        }
 
         function rotatePreview(degrees) {
             const img = document.getElementById('calendarPreviewImage');
@@ -1938,7 +2036,7 @@
         function exportPaidOrdersToCSV() { const paid = globalOrdersCache.filter(o => o.status === 'Pago' || o.status === 'paid'); if(paid.length === 0) return alert("Sem pedidos pagos para exportar."); const csv = Papa.unparse(paid); const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'}); const link = document.createElement("a"); const url = URL.createObjectURL(blob); link.setAttribute("href", url); link.setAttribute("download", "pedidos_pagos.csv"); link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link); }
 
         function initApp() { hideAuthModal(); const app = document.getElementById('appContainer'); if(app) app.classList.remove('hidden'); if(document.getElementById('userDisplay')) document.getElementById('userDisplay').innerText = currentUser?.email || '...'; addMaterialRow(); if(typeof loadGlobalMockupConfig === 'function') loadGlobalMockupConfig(); if(typeof loadOrderFeeConfig === 'function') loadOrderFeeConfig(); loadMaterialsLibrary(); switchModule('dashboard'); }
-        function switchModule(m) { ['dashboard', 'pricing', 'calendar', 'settings'].forEach(x => { const el = document.getElementById(`module-${x}`); if(el) el.classList.add('hidden'); }); const target = document.getElementById(`module-${m}`); if(target) target.classList.remove('hidden'); document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active')); const nav = document.getElementById(`nav-${m}`); if(nav) nav.classList.add('active'); if (m === 'dashboard') loadDashboardData(); if (m === 'calendar') { if(typeof loadGlobalMockupConfig === 'function') loadGlobalMockupConfig(); loadCalendarOrders(); } if (m === 'pricing') { loadMaterialsLibrary(); } if (m === 'settings') { if(typeof loadOrderFeeConfig === 'function') loadOrderFeeConfig(true); } if (window.innerWidth < 768) { const sidebar = document.getElementById('sidebar'); const overlay = document.getElementById('mobileMenuOverlay'); if(sidebar && !sidebar.classList.contains('-translate-x-full')) { sidebar.classList.add('-translate-x-full'); if(overlay) overlay.classList.add('hidden'); } } }
+        function switchModule(m) { ['dashboard', 'pricing', 'calendar', 'settings'].forEach(x => { const el = document.getElementById(`module-${x}`); if(el) el.classList.add('hidden'); }); const target = document.getElementById(`module-${m}`); if(target) target.classList.remove('hidden'); document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active')); const nav = document.getElementById(`nav-${m}`); if(nav) nav.classList.add('active'); if (m === 'dashboard') loadDashboardData(); if (m === 'calendar') { if(typeof loadGlobalMockupConfig === 'function') loadGlobalMockupConfig(); loadCalendarOrders(); } if (m === 'pricing') { loadMaterialsLibrary(); ensureKitPricingUI(); } if (m === 'settings') { if(typeof loadOrderFeeConfig === 'function') loadOrderFeeConfig(true); } if (window.innerWidth < 768) { const sidebar = document.getElementById('sidebar'); const overlay = document.getElementById('mobileMenuOverlay'); if(sidebar && !sidebar.classList.contains('-translate-x-full')) { sidebar.classList.add('-translate-x-full'); if(overlay) overlay.classList.add('hidden'); } } }
         function toggleMobileMenu() { const sidebar = document.getElementById('sidebar'); const overlay = document.getElementById('mobileMenuOverlay'); if (!sidebar || !overlay) return; const isOpen = !sidebar.classList.contains('-translate-x-full'); if (isOpen) { sidebar.classList.add('-translate-x-full'); overlay.classList.add('hidden'); } else { sidebar.classList.remove('-translate-x-full'); overlay.classList.remove('hidden'); } }
 
         async function loadCalendarOrders() { 
@@ -2577,15 +2675,15 @@
                  existingHistory.push({ date: new Date().toISOString(), type: 'creation', msg: 'Produto criado' });
              }
 
-             const baseProd = { user_id: currentUser.id, product_name: name, product_image_data: img, selling_price: mainPrice, base_cost: totalCost, final_margin: marginBase, materials_json: JSON.stringify({ version: 2, materials: materialsList, strategies: strategies, history: existingHistory }) }; 
+             const baseProd = { user_id: currentUser.id, product_name: name, product_image_data: img, selling_price: mainPrice, base_cost: totalCost, final_margin: marginBase, materials_json: JSON.stringify({ version: 2, materials: materialsList, strategies: strategies, history: existingHistory, kit_qty: getKitQty() }) }; 
              
              if(editingProductId) { await supabaseClient.from('pricing_products').update(baseProd).eq('id', editingProductId); alert("Atualizado!"); } 
              else { await supabaseClient.from('pricing_products').insert([{ ...baseProd, created_at: new Date().toISOString() }]); alert("Salvo!"); } 
              cancelEditProduct(); openProductsModal(); 
         }
 
-        function startEditProduct(id) { const product = currentProductsList.find(p => String(p.id) === String(id)); if (!product) return; editingProductId = id; document.getElementById('productsModal').classList.add('hidden'); switchModule('pricing'); document.getElementById('productNameInput').value = product.product_name || ''; document.getElementById('productImageBase64Input').value = product.product_image_data || ''; if(product.product_image_data) { document.getElementById('productImagePreview').src = product.product_image_data; document.getElementById('productImagePreviewContainer').classList.remove('hidden'); } document.getElementById('materialsList').innerHTML = ''; currentEditingStrategies = []; try { const parsed = JSON.parse(product.materials_json || '{}'); if(parsed.materials) parsed.materials.forEach(m => addMaterialRow(m.name, m.qty, m.unit_cost, m.cost)); currentEditingStrategies = parsed.strategies || []; } catch(e) { addMaterialRow(); } document.getElementById('margemLucroInput').value = product.final_margin || ''; document.getElementById('precoVendaFinalInput').value = product.selling_price || ''; calcStep1(); calcResumoCusto(); calcPriceSuggestion(); if(product.selling_price) calcRealMargin(); nextStep(6); document.getElementById('btnSaveProduct').innerText = "Salvar Alterações"; document.getElementById('btnCancelEditProduct').classList.remove('hidden'); }
-        function cancelEditProduct() { editingProductId = null; currentEditingStrategies = []; document.getElementById('btnCancelEditProduct').classList.add('hidden'); document.getElementById('btnSaveProduct').innerText = "Salvar Produto"; document.getElementById('productNameInput').value = ''; clearProductImage(); document.getElementById('materialsList').innerHTML = ''; addMaterialRow(); document.getElementById('margemLucroInput').value = ''; document.getElementById('precoVendaFinalInput').value = ''; document.getElementById('sugestaoPreco').innerText = ''; calcStep1(); calcResumoCusto(); nextStep(1); }
+        function startEditProduct(id) { const product = currentProductsList.find(p => String(p.id) === String(id)); if (!product) return; editingProductId = id; document.getElementById('productsModal').classList.add('hidden'); switchModule('pricing'); document.getElementById('productNameInput').value = product.product_name || ''; document.getElementById('productImageBase64Input').value = product.product_image_data || ''; if(product.product_image_data) { document.getElementById('productImagePreview').src = product.product_image_data; document.getElementById('productImagePreviewContainer').classList.remove('hidden'); } document.getElementById('materialsList').innerHTML = ''; currentEditingStrategies = []; try { const parsed = JSON.parse(product.materials_json || '{}'); if(parsed.materials) parsed.materials.forEach(m => addMaterialRow(m.name, m.qty, m.unit_cost, m.cost)); currentEditingStrategies = parsed.strategies || []; setKitQtyValue(parsed.kit_qty || 1); } catch(e) { addMaterialRow(); setKitQtyValue(1); } document.getElementById('margemLucroInput').value = product.final_margin || ''; document.getElementById('precoVendaFinalInput').value = product.selling_price || ''; calcStep1(); calcResumoCusto(); calcPriceSuggestion(); if(product.selling_price) calcRealMargin(); nextStep(6); document.getElementById('btnSaveProduct').innerText = "Salvar Alterações"; document.getElementById('btnCancelEditProduct').classList.remove('hidden'); }
+        function cancelEditProduct() { editingProductId = null; currentEditingStrategies = []; document.getElementById('btnCancelEditProduct').classList.add('hidden'); document.getElementById('btnSaveProduct').innerText = "Salvar Produto"; document.getElementById('productNameInput').value = ''; clearProductImage(); document.getElementById('materialsList').innerHTML = ''; addMaterialRow(); setKitQtyValue(1); document.getElementById('margemLucroInput').value = ''; document.getElementById('precoVendaFinalInput').value = ''; document.getElementById('sugestaoPreco').innerText = ''; calcStep1(); calcResumoCusto(); nextStep(1); }
         async function deleteProduct(id) { if(isOfflineMode) return alert("Modo Offline"); if(confirm("Excluir?")) { await supabaseClient.from('pricing_products').delete().eq('id', id); loadProducts(); } }
         function handleProductImageUpload(f) { resizeToJpegDataUrl(f, 600).then((b64) => { document.getElementById('productImageBase64Input').value = b64; document.getElementById('productImagePreview').src = b64; document.getElementById('productImagePreviewContainer')?.classList.remove('hidden'); }); }
         function clearProductImage() { document.getElementById('productImageBase64Input').value = ''; document.getElementById('productImagePreview').src = ''; document.getElementById('productImagePreviewContainer')?.classList.add('hidden'); }
@@ -2599,7 +2697,21 @@
         function renderSimulatorTable() { const tbody = document.getElementById('marketplaceSimulatorBody'); if(!tbody) return; tbody.innerHTML = ''; const basePrice = normalizeCurrency(document.getElementById('precoVendaFinalInput').value) || normalizeCurrency(document.getElementById('sugestaoPreco').innerText) || calcResumoCusto() * 2; if (currentEditingStrategies && currentEditingStrategies.length > 0) { currentEditingStrategies.forEach(s => { let pct = s.pct, fix = s.fix; if (pct === undefined) { let rule = orderFeeConfig.overrides.find(o => o.id === s.id); if(s.id === 'default') rule = orderFeeConfig.default; pct = rule ? rule.percent : 0; fix = rule ? rule.fixed : 0; } addSimRow(s.id, s.name, pct, fix, s.price); }); } else { loadSimsFromConfig(basePrice); } }
         function loadSimsFromConfig(basePrice = 0) { const tbody = document.getElementById('marketplaceSimulatorBody'); tbody.innerHTML = ''; if(basePrice === 0) basePrice = normalizeCurrency(document.getElementById('precoVendaFinalInput').value) || calcResumoCusto() * 2; addSimRow('default', 'Padrão', orderFeeConfig.default?.percent || 0, orderFeeConfig.default?.fixed || 0, basePrice); if (orderFeeConfig.overrides) { orderFeeConfig.overrides.forEach(m => addSimRow(m.id, m.name, m.percent, m.fixed, basePrice)); } }
         function addSimRow(id='manual', name='Novo', feePct=0, feeFix=0, initialPrice=0) { const tbody = document.getElementById('marketplaceSimulatorBody'); const tr = document.createElement('tr'); tr.className = "hover:bg-gray-50 transition sim-row group"; tr.dataset.id = id === 'manual' ? 'manual_' + Math.random().toString(36).substr(2, 5) : id; tr.innerHTML = ` <td class="p-3"><input type="text" class="font-bold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 outline-none w-full sim-name" value="${name}"></td> <td class="p-3"><div class="flex items-center"><input type="number" class="w-12 p-1 border rounded text-xs sim-pct" value="${feePct}" oninput="recalcSimRow(this)">%</div></td> <td class="p-3"><div class="flex items-center">R$<input type="number" class="w-12 p-1 border rounded text-xs sim-fix" value="${feeFix}" oninput="recalcSimRow(this)"></div></td> <td class="p-3"><div class="flex items-center border rounded bg-white overflow-hidden focus-within:ring-2 ring-indigo-200"><span class="pl-2 text-gray-500 text-xs">R$</span><input type="number" step="0.01" class="w-full p-2 text-sm outline-none font-bold text-gray-700 sim-price-input" value="${Number(initialPrice).toFixed(2)}" oninput="recalcSimRow(this)"></div></td> <td class="p-3 text-right"><div class="font-bold text-lg sim-profit-display">...</div><div class="text-[10px] text-gray-400 sim-margin-display">...</div></td> <td class="p-3 text-right"><button onclick="this.closest('tr').remove()" class="text-gray-300 hover:text-red-500"><i class="fas fa-trash"></i></button></td> `; tbody.appendChild(tr); recalcSimRow(tr.querySelector('.sim-price-input')); }
-        function recalcSimRow(input) { const row = input.closest('tr'); const price = parseFloat(row.querySelector('.sim-price-input').value) || 0; const pct = parseFloat(row.querySelector('.sim-pct').value) || 0; const fix = parseFloat(row.querySelector('.sim-fix').value) || 0; const baseCost = calcResumoCusto(); const totalFee = (price * (pct / 100)) + fix; const profit = price - baseCost - totalFee; const margin = price > 0 ? (profit / price) * 100 : 0; const pEl = row.querySelector('.sim-profit-display'); pEl.innerText = fmt(profit); pEl.className = `font-bold text-lg sim-profit-display ${profit > 0 ? 'text-green-600' : 'text-red-500'}`; row.querySelector('.sim-margin-display').innerText = `${margin.toFixed(1)}% margem`; }
+        function recalcSimRow(input) {
+            const row = input.closest('tr');
+            const price = parseFloat(row.querySelector('.sim-price-input').value) || 0;
+            const pct = parseFloat(row.querySelector('.sim-pct').value) || 0;
+            const fix = parseFloat(row.querySelector('.sim-fix').value) || 0;
+            const baseCost = calcResumoCusto();
+            const totalFee = (price * (pct / 100)) + fix;
+            const profit = price - baseCost - totalFee;
+            const margin = price > 0 ? (profit / price) * 100 : 0;
+            const kitQty = getKitQty();
+            const pEl = row.querySelector('.sim-profit-display');
+            pEl.innerText = fmt(profit);
+            pEl.className = `font-bold text-lg sim-profit-display ${profit > 0 ? 'text-green-600' : 'text-red-500'}`;
+            row.querySelector('.sim-margin-display').innerText = `${margin.toFixed(1)}% margem${kitQty > 1 ? ` | ${fmt(profit / kitQty)}/un` : ''}`;
+        }
 
         // --- INIT ---
         if (typeof bootstrapAuth === 'function') bootstrapAuth();
