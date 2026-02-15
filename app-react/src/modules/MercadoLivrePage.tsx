@@ -11,7 +11,7 @@ type SellerProfile = {
 type OrderItem = {
   id?: string;
   title?: string;
-  quantity?: number;
+  quantity?: number; 
   unit_price?: number;
   seller_sku?: string; 
   thumbnail?: string; 
