@@ -66,6 +66,25 @@ function normalizeMlRedirectUri(input?: string) {
   }
 }
 
+function base64UrlEncode(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function createCodeVerifier(size = 96) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+  const arr = crypto.getRandomValues(new Uint8Array(size));
+  return Array.from(arr, (n) => chars[n % chars.length]).join("");
+}
+
+async function createCodeChallenge(verifier: string) {
+  const bytes = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return base64UrlEncode(digest);
+}
+
 async function fetchMl<T>(path: string, token: string) {
   const response = await fetch(`https://api.mercadolibre.com${path}`, {
     headers: {
@@ -179,6 +198,14 @@ export function MercadoLivrePage() {
 
     function readCodeFromUrl() {
       const params = new URLSearchParams(window.location.search);
+      const oauthError = params.get("error");
+      const oauthDesc = params.get("error_description");
+      if (oauthError) {
+        setSyncError(
+          `OAuth Mercado Livre: ${oauthError}${oauthDesc ? ` - ${decodeURIComponent(oauthDesc)}` : ""}`
+        );
+        return;
+      }
       const code = params.get("code");
       if (!code) return;
       setOauthCode(code);
@@ -236,17 +263,23 @@ export function MercadoLivrePage() {
     setSyncError(null);
   }
 
-  function startOAuth() {
+  async function startOAuth() {
     if (!hasOAuthConfig || !clientId) {
       setSyncError("Configure VITE_ML_CLIENT_ID no .env.");
       return;
     }
+
+    const verifier = createCodeVerifier();
+    const challenge = await createCodeChallenge(verifier);
+    sessionStorage.setItem("ml_pkce_verifier", verifier);
 
     const authUrl = new URL("https://auth.mercadolivre.com.br/authorization");
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("client_id", clientId);
     authUrl.searchParams.set("redirect_uri", redirectUri);
     authUrl.searchParams.set("state", crypto.randomUUID());
+    authUrl.searchParams.set("code_challenge", challenge);
+    authUrl.searchParams.set("code_challenge_method", "S256");
     window.location.assign(authUrl.toString());
   }
 
@@ -267,7 +300,8 @@ export function MercadoLivrePage() {
       const { data, error } = await supabase.functions.invoke("ml-oauth-token", {
         body: {
           code: oauthCode,
-          redirect_uri: redirectUri
+          redirect_uri: redirectUri,
+          code_verifier: sessionStorage.getItem("ml_pkce_verifier") || undefined
         }
       });
 
@@ -286,6 +320,7 @@ export function MercadoLivrePage() {
 
       setAccessToken(token);
       setSyncInfo("Token recebido com sucesso via Edge Function.");
+      sessionStorage.removeItem("ml_pkce_verifier");
       const cleanUrl = `${window.location.origin}${window.location.pathname}`;
       window.history.replaceState({}, document.title, cleanUrl);
       setOauthCode(null);
