@@ -86,6 +86,18 @@ type OrderLine = {
   status: string;
 };
 
+type SavedProduct = {
+  id: string | number;
+  product_name: string | null;
+  base_cost: number | null;
+  materials_json?: unknown;
+};
+
+type CostLinks = {
+  by_sku?: Record<string, string>;
+  by_title?: Record<string, string>;
+};
+
 const PERIODS = [
   { label: "Hoje", days: 1 },
   { label: "Ontem", days: 2 },
@@ -227,6 +239,19 @@ function calcOrderShipping(order: Order) {
 
 function tokenSettingId(userId: string) {
   return `ml_access_token_${userId}`;
+}
+
+function costLinksSettingId(userId: string) {
+  return `ml_cost_links_${userId}`;
+}
+
+function normalizeKey(text?: string) {
+  return String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function normalizeMlRedirectUri(input?: string) {
@@ -392,6 +417,9 @@ export function MercadoLivrePage() {
   const [oauthCode, setOauthCode] = useState<string | null>(null);
   const [rangeDays, setRangeDays] = useState(30);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [savedProducts, setSavedProducts] = useState<SavedProduct[]>([]);
+  const [costLinks, setCostLinks] = useState<CostLinks>({});
+  const [savingLinkKey, setSavingLinkKey] = useState<string | null>(null);
   const handledOauthCodeRef = useRef<string | null>(null);
   const syncRunningRef = useRef(false);
 
@@ -423,9 +451,25 @@ export function MercadoLivrePage() {
       const token = String(tokenRow?.config_data?.access_token || "").trim();
       if (token) {
         setAccessToken(token);
-        return;
       }
 
+      const { data: productsData } = await supabase
+        .from("pricing_products")
+        .select("id, product_name, base_cost, materials_json")
+        .eq("user_id", uid)
+        .order("created_at", { ascending: false });
+      setSavedProducts((productsData || []) as SavedProduct[]);
+
+      const { data: linksRow } = await supabase
+        .from("app_settings")
+        .select("config_data")
+        .eq("id", costLinksSettingId(uid))
+        .maybeSingle();
+      const rawLinks = (linksRow?.config_data || {}) as CostLinks;
+      setCostLinks({
+        by_sku: rawLinks.by_sku || {},
+        by_title: rawLinks.by_title || {}
+      });
     }
 
     function readCodeFromUrl() {
@@ -473,6 +517,76 @@ export function MercadoLivrePage() {
   }, [accessToken, rangeDays, userId]);
 
   const dashboard = useMemo(() => computeStats(orders), [orders]);
+  const productsById = useMemo(() => {
+    const map = new Map<string, SavedProduct>();
+    for (const p of savedProducts) {
+      map.set(String(p.id), p);
+    }
+    return map;
+  }, [savedProducts]);
+
+  function findMatchedProduct(line: OrderLine) {
+    const skuKey = normalizeKey(line.sku);
+    const titleKey = normalizeKey(line.title);
+
+    const linkBySku = skuKey && costLinks.by_sku?.[skuKey];
+    if (linkBySku && productsById.has(linkBySku)) return productsById.get(linkBySku) || null;
+
+    const linkByTitle = titleKey && costLinks.by_title?.[titleKey];
+    if (linkByTitle && productsById.has(linkByTitle)) return productsById.get(linkByTitle) || null;
+
+    const exactTitle = savedProducts.find((p) => normalizeKey(p.product_name || "") === titleKey);
+    if (exactTitle) return exactTitle;
+
+    const containsTitle = savedProducts.find((p) =>
+      normalizeKey(p.product_name || "").includes(titleKey) || titleKey.includes(normalizeKey(p.product_name || ""))
+    );
+    if (containsTitle) return containsTitle;
+
+    return null;
+  }
+
+  const linesWithCost = useMemo(() => {
+    return dashboard.lines.map((line) => {
+      const product = findMatchedProduct(line);
+      const unitCost = Number(product?.base_cost) || 0;
+      const totalCost = unitCost * Math.max(1, Number(line.qty) || 1);
+      const netProfit = line.profit - totalCost;
+      return {
+        ...line,
+        linkedProductId: product ? String(product.id) : "",
+        linkedProductName: product?.product_name || "",
+        unitCost,
+        totalCost,
+        netProfit
+      };
+    });
+  }, [dashboard.lines, savedProducts, costLinks, productsById]);
+
+  async function saveCostLink(line: OrderLine, productId: string) {
+    if (!supabase || !userId) return;
+    const skuKey = normalizeKey(line.sku);
+    const titleKey = normalizeKey(line.title);
+    const next: CostLinks = {
+      by_sku: { ...(costLinks.by_sku || {}) },
+      by_title: { ...(costLinks.by_title || {}) }
+    };
+
+    if (skuKey) next.by_sku![skuKey] = productId;
+    if (titleKey) next.by_title![titleKey] = productId;
+
+    setSavingLinkKey(`${line.id}-${line.sku}-${line.title}`);
+    setCostLinks(next);
+
+    const { error } = await supabase.from("app_settings").upsert({
+      id: costLinksSettingId(userId),
+      config_data: next
+    });
+    if (error) {
+      setSyncError(`Nao foi possivel salvar vinculo de custo: ${error.message}`);
+    }
+    setSavingLinkKey(null);
+  }
 
   async function syncData(token: string, days = rangeDays, silent = false) {
     if (syncRunningRef.current) return;
@@ -803,7 +917,7 @@ export function MercadoLivrePage() {
       <div className="ml-orders-table-wrap">
         <div className="ml-orders-head">
           <h3>Pedidos recentes</h3>
-          <span>{dashboard.lines.length} registros</span>
+          <span>{linesWithCost.length} registros</span>
         </div>
         <div className="table-wrap">
           <table className="table clean">
@@ -817,17 +931,18 @@ export function MercadoLivrePage() {
                 <th>Qtde</th>
                 <th>Valor</th>
                 <th>Tarifa</th>
+                <th>Custo Produto</th>
                 <th>Lucro</th>
                 <th>Status</th>
               </tr>
             </thead>
             <tbody>
-              {dashboard.lines.length === 0 ? (
+              {linesWithCost.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>Sem pedidos no periodo selecionado.</td>
+                  <td colSpan={11}>Sem pedidos no periodo selecionado.</td>
                 </tr>
               ) : (
-                dashboard.lines.map((row) => (
+                linesWithCost.map((row) => (
                   <tr key={row.id}>
                     <td>
                       {row.thumb ? (
@@ -843,7 +958,25 @@ export function MercadoLivrePage() {
                     <td>{row.qty}</td>
                     <td>{fmtMoney(row.amount)}</td>
                     <td>{fmtMoney(row.fee)}</td>
-                    <td className={row.profit >= 0 ? "profit-up" : "profit-down"}>{fmtMoney(row.profit)}</td>
+                    <td>
+                      <div className="ml-cost-cell">
+                        <strong>{fmtMoney(row.totalCost)}</strong>
+                        <select
+                          className="ml-cost-select"
+                          value={row.linkedProductId}
+                          onChange={(e) => void saveCostLink(row, e.target.value)}
+                          disabled={savingLinkKey === `${row.id}-${row.sku}-${row.title}`}
+                        >
+                          <option value="">Anexar produto...</option>
+                          {savedProducts.map((p) => (
+                            <option key={String(p.id)} value={String(p.id)}>
+                              {(p.product_name || "Sem nome")} - {fmtMoney(Number(p.base_cost) || 0)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </td>
+                    <td className={row.netProfit >= 0 ? "profit-up" : "profit-down"}>{fmtMoney(row.netProfit)}</td>
                     <td>{row.status}</td>
                   </tr>
                 ))

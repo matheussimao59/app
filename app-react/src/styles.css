@@ -937,6 +937,24 @@ body {
   background: #f8fafc;
 }
 
+.ml-cost-cell {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.ml-cost-cell strong {
+  font-size: 0.85rem;
+}
+
+.ml-cost-select {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px 8px;
+  font-size: 0.78rem;
+}
+
 .ml-hero {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
