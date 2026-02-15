@@ -126,10 +126,11 @@ export function MercadoLivrePage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [oauthCode, setOauthCode] = useState<string | null>(null);
 
-  const clientId = (import.meta.env.VITE_ML_CLIENT_ID as string | undefined)?.trim();
-  const redirectUriEnv = (import.meta.env.VITE_ML_REDIRECT_URI as string | undefined)?.trim();
+  const viteEnv = ((import.meta as any)?.env || {}) as Record<string, string | undefined>;
+  const clientId = viteEnv.VITE_ML_CLIENT_ID?.trim();
+  const redirectUriEnv = viteEnv.VITE_ML_REDIRECT_URI?.trim();
   const redirectUri = redirectUriEnv || `${window.location.origin}/mercado-livre`;
-  const adminAccessToken = (import.meta.env.VITE_ML_ADMIN_ACCESS_TOKEN as string | undefined)?.trim();
+  const adminAccessToken = viteEnv.VITE_ML_ADMIN_ACCESS_TOKEN?.trim();
   const hasOAuthConfig = Boolean(clientId);
 
   useEffect(() => {
