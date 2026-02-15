@@ -27,6 +27,11 @@ type OrdersResponse = {
   results?: Order[];
 };
 
+type SyncResponse = {
+  seller?: SellerProfile;
+  orders?: Order[];
+};
+
 type DashboardStats = {
   ordersCount: number;
   unitsCount: number;
@@ -98,21 +103,6 @@ async function createCodeChallenge(verifier: string) {
   const bytes = new TextEncoder().encode(verifier);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return base64UrlEncode(digest);
-}
-
-async function fetchMl<T>(path: string, token: string) {
-  const response = await fetch(`https://api.mercadolibre.com${path}`, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Erro ${response.status} ao consultar Mercado Livre.`);
-  }
-
-  return (await response.json()) as T;
 }
 
 function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: TopProduct[] } {
@@ -243,24 +233,36 @@ export function MercadoLivrePage() {
     setSyncInfo(null);
 
     try {
-      const profile = await fetchMl<SellerProfile>("/users/me", token);
       const fromDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const ordersResponse = await fetchMl<OrdersResponse>(
-        `/orders/search?seller=${profile.id}&sort=date_desc&limit=50&order.date_created.from=${encodeURIComponent(fromDate)}`,
-        token
-      );
+      if (!supabase) {
+        throw new Error("Supabase nao configurado para sincronizar.");
+      }
 
-      setSeller(profile);
-      setOrders(ordersResponse.results || []);
+      const { data, error } = await supabase.functions.invoke("ml-sync", {
+        body: {
+          access_token: token,
+          from_date: fromDate
+        }
+      });
+
+      if (error) throw new Error(error.message);
+      const payload = (data || {}) as SyncResponse;
+      if (!payload?.seller) throw new Error("Resposta invalida da funcao ml-sync.");
+
+      setSeller(payload.seller);
+      setOrders(payload.orders || []);
       setSyncInfo("Dados sincronizados com sucesso (janela de 30 dias).");
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
           : "Falha ao sincronizar dados do Mercado Livre.";
-      setSyncError(
-        `Nao foi possivel sincronizar. Verifique token/permissoes. Detalhe: ${message}`
-      );
+      const hint =
+        message.includes("Failed to send a request to the Edge Function") ||
+        message.includes("FunctionsFetchError")
+          ? " Verifique se a funcao `ml-sync` foi deployada no Supabase."
+          : "";
+      setSyncError(`Nao foi possivel sincronizar. Verifique token/permissoes. Detalhe: ${message}.${hint}`);
     } finally {
       setLoading(false);
     }
