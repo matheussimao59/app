@@ -344,7 +344,12 @@ export function MercadoLivrePage() {
         error instanceof Error
           ? error.message
           : "Falha ao trocar codigo por token.";
-      setSyncError(`Nao foi possivel trocar o codigo. Detalhe: ${message}`);
+      const hint =
+        message.includes("Failed to send a request to the Edge Function") ||
+        message.includes("FunctionsFetchError")
+          ? " Verifique se a funcao `ml-oauth-token` foi deployada no Supabase e se os secrets ML_CLIENT_ID/ML_CLIENT_SECRET estao definidos."
+          : "";
+      setSyncError(`Nao foi possivel trocar o codigo. Detalhe: ${message}.${hint}`);
     } finally {
       setLoading(false);
     }
