@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 type ProductRow = {
@@ -16,6 +16,24 @@ type ProductJson = {
   materials?: Array<{ name?: string; qty?: number; unit_cost?: number; cost?: number }>;
   strategies?: Array<{ name?: string; price?: number; pct?: number; fix?: number }>;
   history?: Array<{ date?: string; msg?: string; type?: string; old?: number; new?: number }>;
+  salary_target?: number;
+  hours_per_month?: number;
+  minutes_per_unit?: number;
+  fixed_pct?: number;
+};
+
+type EditMaterial = {
+  id: string;
+  name: string;
+  qty: number;
+  unit_cost: number;
+};
+
+type MaterialLibraryRow = {
+  id: string;
+  name: string;
+  unit_cost?: number | null;
+  cost_per_unit?: number | null;
 };
 
 function fmt(value: number) {
@@ -45,6 +63,34 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+function makeEditMaterial(): EditMaterial {
+  return { id: crypto.randomUUID(), name: "", qty: 1, unit_cost: 0 };
+}
+
+function normalizeKey(text?: string) {
+  return String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function calcBaseCostFromJson(json: ProductJson) {
+  const kitQty = Math.max(1, Math.floor(Number(json.kit_qty) || 1));
+  const materialsCostPerUnit = (json.materials || []).reduce((acc, m) => {
+    return acc + (Number(m.qty) || 0) * (Number(m.unit_cost) || 0);
+  }, 0);
+  const salaryTarget = Number(json.salary_target) || 0;
+  const hoursPerMonth = Number(json.hours_per_month) || 0;
+  const minutesPerUnit = Number(json.minutes_per_unit) || 0;
+  const laborHourCost = hoursPerMonth > 0 ? salaryTarget / hoursPerMonth : 0;
+  const laborPerUnit = laborHourCost * (minutesPerUnit / 60);
+  const fixedPct = Number(json.fixed_pct) || 0;
+  const subtotalKit = (materialsCostPerUnit + laborPerUnit) * kitQty;
+  return subtotalKit * (1 + fixedPct / 100);
+}
+
 export function ProductsPage() {
   const [items, setItems] = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,18 +107,141 @@ export function ProductsPage() {
   const [editMargin, setEditMargin] = useState(0);
   const [editKitQty, setEditKitQty] = useState(1);
   const [editImageData, setEditImageData] = useState("");
+  const [editMaterials, setEditMaterials] = useState<EditMaterial[]>([makeEditMaterial()]);
+  const [autoSyncInfo, setAutoSyncInfo] = useState<string | null>(null);
+  const [manualSyncing, setManualSyncing] = useState(false);
+  const syncRunningRef = useRef(false);
+  const runSyncRef = useRef<null | (() => Promise<void>)>(null);
 
   useEffect(() => {
     let mounted = true;
 
-    async function run() {
+    async function syncProductsByMaterialChange(
+      userId: string,
+      products: ProductRow[],
+      forceFullFix = false
+    ) {
+      if (!supabase || syncRunningRef.current) return products;
+      syncRunningRef.current = true;
+      try {
+        const { data: libRows } = await supabase
+          .from("pricing_materials")
+          .select("id, name, unit_cost, cost_per_unit")
+          .eq("user_id", userId);
+
+        const libMap = new Map<string, number>();
+        ((libRows || []) as MaterialLibraryRow[]).forEach((row) => {
+          const key = normalizeKey(row.name);
+          if (!key) return;
+          const price = Number(row.unit_cost ?? row.cost_per_unit ?? 0) || 0;
+          libMap.set(key, price);
+        });
+
+        let changedProducts = 0;
+        const nextProducts = [...products];
+
+        for (let i = 0; i < nextProducts.length; i += 1) {
+          const p = nextProducts[i];
+          const json = parseJson(p.materials_json);
+          const mats = json.materials || [];
+          if (!mats.length) continue;
+
+          let changedMats = 0;
+          const updatedMaterials = mats.map((m) => {
+            const key = normalizeKey(m.name);
+            const currentCost = Number(m.unit_cost) || 0;
+            const libCost = key ? libMap.get(key) : undefined;
+            if (typeof libCost === "number" && Math.abs(libCost - currentCost) > 0.0001) {
+              changedMats += 1;
+              const qty = Number(m.qty) || 0;
+              return { ...m, unit_cost: libCost, cost: qty * libCost };
+            }
+            return {
+              ...m,
+              cost: (Number(m.qty) || 0) * (Number(m.unit_cost) || 0)
+            };
+          });
+
+          const oldBase = Number(p.base_cost) || 0;
+          const oldPrice = Number(p.selling_price) || 0;
+          const marginPct = Number(p.final_margin) || 0;
+          const nextJsonBase: ProductJson = {
+            ...json,
+            materials: updatedMaterials
+          };
+          const nextBaseRaw = calcBaseCostFromJson(nextJsonBase);
+          const nextBase = Number(nextBaseRaw.toFixed(2));
+          const safeMultiplier = 1 - marginPct / 100;
+          const nextPriceRaw = safeMultiplier > 0 ? nextBaseRaw / safeMultiplier : oldPrice;
+          const nextPrice = Number(nextPriceRaw.toFixed(2));
+
+          const hasWrongBase = Math.abs(nextBase - oldBase) > 0.01;
+          const shouldFix = changedMats > 0 || (forceFullFix && hasWrongBase);
+
+          if (!shouldFix) continue;
+
+          const reason =
+            changedMats > 0
+              ? `${changedMats} material(is) com preco novo da biblioteca`
+              : "correcao manual de valores inconsistentes";
+          const nextJson: ProductJson = {
+            ...nextJsonBase,
+            history: [
+              {
+                date: new Date().toISOString(),
+                msg: `Atualizacao automatica: ${reason}`,
+                type: changedMats > 0 ? "material_sync" : "value_fix",
+                old: oldBase
+              },
+              ...(json.history || [])
+            ].slice(0, 50)
+          };
+
+          if (nextJson.history && nextJson.history[0]) {
+            nextJson.history[0].new = nextBase;
+          }
+
+          const { error: updateError } = await supabase
+            .from("pricing_products")
+            .update({
+              materials_json: nextJson,
+              base_cost: nextBase
+            })
+            .eq("id", p.id)
+            .eq("user_id", userId);
+
+          if (!updateError) {
+            changedProducts += 1;
+            nextProducts[i] = {
+              ...p,
+              materials_json: nextJson,
+              base_cost: nextBase
+            };
+          }
+        }
+
+        if (changedProducts > 0) {
+          setAutoSyncInfo(
+            `Atualizacao automatica: ${changedProducts} produto(s) recalculado(s).`
+          );
+        } else if (forceFullFix) {
+          setAutoSyncInfo("Nenhuma correcao de valor necessaria no momento.");
+        }
+
+        return nextProducts;
+      } finally {
+        syncRunningRef.current = false;
+      }
+    }
+
+    async function run(initial = false, forceFullFix = false) {
       if (!supabase) {
         setError("Supabase nao configurado.");
         setLoading(false);
         return;
       }
 
-      setLoading(true);
+      if (initial) setLoading(true);
       setError(null);
 
       const { data: authData } = await supabase.auth.getUser();
@@ -82,7 +251,7 @@ export function ProductsPage() {
         if (!mounted) return;
         setItems([]);
         setError("Usuario nao autenticado.");
-        setLoading(false);
+        if (initial) setLoading(false);
         return;
       }
 
@@ -98,15 +267,36 @@ export function ProductsPage() {
         setItems([]);
         setError(queryError.message);
       } else {
-        setItems((data || []) as ProductRow[]);
+        const syncedItems = await syncProductsByMaterialChange(
+          userId,
+          (data || []) as ProductRow[],
+          forceFullFix
+        );
+        if (!mounted) return;
+        setItems(syncedItems);
+        setSelected((prev) => {
+          if (!prev) return null;
+          return syncedItems.find((item) => String(item.id) === String(prev.id)) || prev;
+        });
       }
 
-      setLoading(false);
+      if (initial) setLoading(false);
     }
 
-    run();
+    void run(true);
+    runSyncRef.current = async () => {
+      setManualSyncing(true);
+      await run(false, true);
+      setManualSyncing(false);
+    };
+    const timer = window.setInterval(() => {
+      void run(false);
+    }, 20_000);
+
     return () => {
       mounted = false;
+      runSyncRef.current = null;
+      window.clearInterval(timer);
     };
   }, []);
 
@@ -124,6 +314,15 @@ export function ProductsPage() {
 
   function startEdit(product: ProductRow) {
     const json = parseJson(product.materials_json);
+    const sourceMaterials = (json.materials || [])
+      .map((m) => ({
+        id: crypto.randomUUID(),
+        name: String(m.name || ""),
+        qty: Number(m.qty) || 0,
+        unit_cost: Number(m.unit_cost) || 0
+      }))
+      .filter((m) => m.name || m.qty > 0 || m.unit_cost > 0);
+
     setEditMode(true);
     setEditStatus(null);
     setEditName(product.product_name || "");
@@ -132,6 +331,7 @@ export function ProductsPage() {
     setEditMargin(Number(product.final_margin) || 0);
     setEditKitQty(Math.max(1, Math.floor(Number(json.kit_qty) || 1)));
     setEditImageData(product.product_image_data || "");
+    setEditMaterials(sourceMaterials.length > 0 ? sourceMaterials : [makeEditMaterial()]);
   }
 
   function cancelEdit() {
@@ -162,9 +362,21 @@ export function ProductsPage() {
     setEditStatus(null);
 
     const oldJson = parseJson(selected.materials_json);
+    const cleanMaterials = editMaterials
+      .map((m) => ({
+        name: m.name.trim(),
+        qty: Number(m.qty) || 0,
+        unit_cost: Number(m.unit_cost) || 0
+      }))
+      .filter((m) => m.name);
+
     const nextJson: ProductJson = {
       ...oldJson,
-      kit_qty: Math.max(1, Math.floor(editKitQty || 1))
+      kit_qty: Math.max(1, Math.floor(editKitQty || 1)),
+      materials: cleanMaterials.map((m) => ({
+        ...m,
+        cost: (Number(m.qty) || 0) * (Number(m.unit_cost) || 0)
+      }))
     };
 
     const { error: updateError } = await supabase
@@ -202,6 +414,29 @@ export function ProductsPage() {
     setEditMode(false);
   }
 
+  function updateEditMaterial(
+    id: string,
+    field: "name" | "qty" | "unit_cost",
+    value: string
+  ) {
+    setEditMaterials((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        if (field === "name") return { ...item, name: value };
+        if (field === "qty") return { ...item, qty: Number(value) || 0 };
+        return { ...item, unit_cost: Number(value) || 0 };
+      })
+    );
+  }
+
+  function addEditMaterial() {
+    setEditMaterials((prev) => [...prev, makeEditMaterial()]);
+  }
+
+  function removeEditMaterial(id: string) {
+    setEditMaterials((prev) => (prev.length <= 1 ? prev : prev.filter((item) => item.id !== id)));
+  }
+
   function closeModal() {
     setSelected(null);
     setEditMode(false);
@@ -216,6 +451,14 @@ export function ProductsPage() {
           <h2>Meus Produtos</h2>
           <p className="page-text">Modulo real em React conectado ao Supabase.</p>
         </div>
+        <button
+          type="button"
+          className="ghost-btn"
+          disabled={manualSyncing}
+          onClick={() => void runSyncRef.current?.()}
+        >
+          {manualSyncing ? "Atualizando..." : "Atualizar agora"}
+        </button>
         <input
           className="products-search"
           placeholder="Buscar produto..."
@@ -229,6 +472,7 @@ export function ProductsPage() {
       {!loading && !error && filtered.length === 0 && (
         <p className="page-text">Nenhum produto encontrado.</p>
       )}
+      {autoSyncInfo && <p className="page-text">{autoSyncInfo}</p>}
 
       <div className="products-grid">
         {filtered.map((p) => {
@@ -327,6 +571,53 @@ export function ProductsPage() {
                     <input type="file" accept="image/*" onChange={(e) => void onEditImageChange(e.target.files?.[0] || null)} />
                   </label>
                 </div>
+
+                <p className="pricing-lib-title">Materiais do produto</p>
+                <div className="pricing-rows">
+                  {editMaterials.map((item) => (
+                    <div className="pricing-row" key={item.id}>
+                      <input
+                        className="pricing-item-input"
+                        value={item.name}
+                        onChange={(e) => updateEditMaterial(item.id, "name", e.target.value)}
+                        placeholder="Item"
+                      />
+                      <input
+                        className="pricing-small-input"
+                        type="number"
+                        step="0.01"
+                        value={item.qty}
+                        onChange={(e) => updateEditMaterial(item.id, "qty", e.target.value)}
+                      />
+                      <input
+                        className="pricing-small-input"
+                        type="number"
+                        step="0.01"
+                        value={item.unit_cost}
+                        onChange={(e) => updateEditMaterial(item.id, "unit_cost", e.target.value)}
+                        placeholder="$ Unit"
+                      />
+                      <input
+                        className="pricing-total-input"
+                        readOnly
+                        value={((Number(item.qty) || 0) * (Number(item.unit_cost) || 0)).toLocaleString("pt-BR", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2
+                        })}
+                      />
+                      <button
+                        type="button"
+                        className="pricing-trash"
+                        onClick={() => removeEditMaterial(item.id)}
+                      >
+                        Excluir
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" className="pricing-add-line" onClick={addEditMaterial}>
+                  + Adicionar material
+                </button>
 
                 {editImageData && (
                   <div className="pricing-image-preview-wrap">

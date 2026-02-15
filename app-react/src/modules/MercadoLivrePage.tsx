@@ -55,6 +55,7 @@ type DashboardStats = {
   ordersCount: number;
   unitsCount: number;
   grossRevenue: number;
+  netRevenue: number;
   paidRevenue: number;
   avgTicket: number;
   cancelledCount: number;
@@ -390,6 +391,7 @@ function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: To
   }
 
   const avgTicket = ordersCount > 0 ? grossRevenue / ordersCount : 0;
+  const netRevenue = grossRevenue - feesEstimated;
   const profitEstimated = grossRevenue - feesEstimated - taxesEstimated - shippingEstimated;
   const avgProfit = ordersCount > 0 ? profitEstimated / ordersCount : 0;
   const topProducts = [...topMap.entries()]
@@ -407,6 +409,7 @@ function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: To
       ordersCount,
       unitsCount,
       grossRevenue,
+      netRevenue,
       paidRevenue,
       avgTicket,
       cancelledCount,
@@ -898,7 +901,8 @@ export function MercadoLivrePage() {
       <div className="ml-summary-head">
         <div>
           <p className="ml-summary-label">💰 Faturamento</p>
-          <strong>{fmtMoney(dashboard.stats.grossRevenue)}</strong>
+          <strong>{fmtMoney(dashboard.stats.netRevenue)}</strong>
+          <span className="ml-summary-sub">Liquido apos tarifas ML</span>
         </div>
         <div>
           <p className="ml-summary-label">📈 Lucro estimado</p>
@@ -951,7 +955,8 @@ export function MercadoLivrePage() {
         </article>
         <article className="kpi-card elevated">
           <p>💵 Receita paga</p>
-          <strong>{fmtMoney(dashboard.stats.paidRevenue)}</strong>
+          <strong>{fmtMoney(dashboard.stats.grossRevenue)}</strong>
+          <span>Bruta (antes das tarifas)</span>
         </article>
       </div>
 
@@ -1008,7 +1013,7 @@ export function MercadoLivrePage() {
               <li>Seller ID: {seller.id}</li>
               <li>Nickname: {seller.nickname || "-"}</li>
               <li>Nome: {[seller.first_name, seller.last_name].filter(Boolean).join(" ") || "-"}</li>
-              <li>Receita paga: {fmtMoney(dashboard.stats.paidRevenue)}</li>
+              <li>Receita paga: {fmtMoney(dashboard.stats.grossRevenue)}</li>
             </ul>
           ) : isConnectingState ? (
             <p className="page-text">Conta conectada. Sincronizando dados...</p>
@@ -1114,4 +1119,3 @@ export function MercadoLivrePage() {
     </section>
   );
 }
-
