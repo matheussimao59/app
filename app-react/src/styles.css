@@ -1689,6 +1689,22 @@ body {
   font-size: 0.8rem;
 }
 
+.table-input {
+  width: 100%;
+  min-width: 84px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  padding: 7px 8px;
+  font-size: 0.84rem;
+}
+
+.table-input:focus {
+  outline: none;
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.2);
+}
+
 .mobile-menu-btn {
   display: none;
   border: 1px solid #d1d5db;

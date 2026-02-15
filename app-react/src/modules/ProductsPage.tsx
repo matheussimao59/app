@@ -36,12 +36,31 @@ function parseJson(raw: unknown): ProductJson {
   }
 }
 
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 export function ProductsPage() {
   const [items, setItems] = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ProductRow | null>(null);
+
+  const [editMode, setEditMode] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editStatus, setEditStatus] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editPrice, setEditPrice] = useState(0);
+  const [editCost, setEditCost] = useState(0);
+  const [editMargin, setEditMargin] = useState(0);
+  const [editKitQty, setEditKitQty] = useState(1);
+  const [editImageData, setEditImageData] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -103,6 +122,93 @@ export function ProductsPage() {
   const selectedStrategies = selectedJson.strategies || [];
   const selectedHistory = selectedJson.history || [];
 
+  function startEdit(product: ProductRow) {
+    const json = parseJson(product.materials_json);
+    setEditMode(true);
+    setEditStatus(null);
+    setEditName(product.product_name || "");
+    setEditPrice(Number(product.selling_price) || 0);
+    setEditCost(Number(product.base_cost) || 0);
+    setEditMargin(Number(product.final_margin) || 0);
+    setEditKitQty(Math.max(1, Math.floor(Number(json.kit_qty) || 1)));
+    setEditImageData(product.product_image_data || "");
+  }
+
+  function cancelEdit() {
+    setEditMode(false);
+    setSavingEdit(false);
+    setEditStatus(null);
+  }
+
+  async function onEditImageChange(file: File | null) {
+    if (!file) return;
+    const b64 = await fileToDataUrl(file);
+    setEditImageData(b64);
+  }
+
+  async function saveEdit() {
+    if (!supabase || !selected) {
+      setEditStatus("Supabase nao configurado.");
+      return;
+    }
+
+    const name = editName.trim();
+    if (!name) {
+      setEditStatus("Informe o nome do produto.");
+      return;
+    }
+
+    setSavingEdit(true);
+    setEditStatus(null);
+
+    const oldJson = parseJson(selected.materials_json);
+    const nextJson: ProductJson = {
+      ...oldJson,
+      kit_qty: Math.max(1, Math.floor(editKitQty || 1))
+    };
+
+    const { error: updateError } = await supabase
+      .from("pricing_products")
+      .update({
+        product_name: name,
+        product_image_data: editImageData || null,
+        selling_price: Number(editPrice) || 0,
+        base_cost: Number(editCost) || 0,
+        final_margin: Number(editMargin) || 0,
+        materials_json: nextJson
+      })
+      .eq("id", selected.id);
+
+    if (updateError) {
+      setEditStatus(`Erro ao atualizar: ${updateError.message}`);
+      setSavingEdit(false);
+      return;
+    }
+
+    const updatedProduct: ProductRow = {
+      ...selected,
+      product_name: name,
+      product_image_data: editImageData || null,
+      selling_price: Number(editPrice) || 0,
+      base_cost: Number(editCost) || 0,
+      final_margin: Number(editMargin) || 0,
+      materials_json: nextJson
+    };
+
+    setItems((prev) => prev.map((item) => (String(item.id) === String(selected.id) ? updatedProduct : item)));
+    setSelected(updatedProduct);
+    setEditStatus("Produto atualizado com sucesso.");
+    setSavingEdit(false);
+    setEditMode(false);
+  }
+
+  function closeModal() {
+    setSelected(null);
+    setEditMode(false);
+    setEditStatus(null);
+    setSavingEdit(false);
+  }
+
   return (
     <section className="page">
       <div className="products-head">
@@ -158,12 +264,88 @@ export function ProductsPage() {
       </div>
 
       {selected && (
-        <div className="modal-backdrop" onClick={() => setSelected(null)}>
+        <div className="modal-backdrop" onClick={closeModal}>
           <div className="product-modal" onClick={(e) => e.stopPropagation()}>
             <div className="product-modal-head">
               <h3>{selected.product_name || "Produto"}</h3>
-              <button onClick={() => setSelected(null)}>Fechar</button>
+              <div className="materials-actions-cell">
+                {!editMode && (
+                  <button type="button" className="ghost-btn" onClick={() => startEdit(selected)}>
+                    Editar
+                  </button>
+                )}
+                <button onClick={closeModal}>Fechar</button>
+              </div>
             </div>
+
+            {editMode && (
+              <div className="soft-panel">
+                <p>Editar produto</p>
+                <div className="form-grid three-col">
+                  <label className="field">
+                    <span>Nome</span>
+                    <input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                  </label>
+                  <label className="field">
+                    <span>Preco</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editPrice}
+                      onChange={(e) => setEditPrice(Number(e.target.value) || 0)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Custo</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editCost}
+                      onChange={(e) => setEditCost(Number(e.target.value) || 0)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Margem final (%)</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editMargin}
+                      onChange={(e) => setEditMargin(Number(e.target.value) || 0)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Qtd kit</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={editKitQty}
+                      onChange={(e) => setEditKitQty(Math.max(1, Number(e.target.value) || 1))}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Imagem (opcional)</span>
+                    <input type="file" accept="image/*" onChange={(e) => void onEditImageChange(e.target.files?.[0] || null)} />
+                  </label>
+                </div>
+
+                {editImageData && (
+                  <div className="pricing-image-preview-wrap">
+                    <img src={editImageData} alt="Preview produto editado" className="pricing-image-preview" />
+                  </div>
+                )}
+
+                <div className="actions-row">
+                  <button type="button" className="ghost-btn" onClick={cancelEdit}>
+                    Cancelar
+                  </button>
+                  <button type="button" className="primary-btn" onClick={saveEdit} disabled={savingEdit}>
+                    {savingEdit ? "Salvando..." : "Salvar alteracoes"}
+                  </button>
+                </div>
+
+                {editStatus && <p className="page-text">{editStatus}</p>}
+              </div>
+            )}
 
             <div className="product-modal-grid">
               <div className="soft-panel">
@@ -218,7 +400,7 @@ export function ProductsPage() {
                   <ul>
                     {selectedHistory.slice(0, 8).map((h, i) => (
                       <li key={`${h.date || "h"}-${i}`}>
-                        {(h.date && new Date(h.date).toLocaleDateString("pt-BR")) || "Data"} - {" "}
+                        {(h.date && new Date(h.date).toLocaleDateString("pt-BR")) || "Data"} -{" "}
                         {h.msg || h.type || "Atualizacao"}
                       </li>
                     ))}

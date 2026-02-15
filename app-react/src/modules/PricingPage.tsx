@@ -50,6 +50,10 @@ function makeMaterial(): Material {
   return { id: crypto.randomUUID(), name: "", qty: 1, unit_cost: 0 };
 }
 
+function makeMarketplaceId() {
+  return `mkt_${crypto.randomUUID()}`;
+}
+
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -245,6 +249,79 @@ export function PricingPage() {
 
   function addMaterial() {
     setMaterials((prev) => [...prev, makeMaterial()]);
+  }
+
+  function updateMarketplace(
+    id: string,
+    field: "name" | "percent" | "fixed",
+    value: string
+  ) {
+    const hasOverrides = feeConfig.overrides.length > 0;
+
+    if (!hasOverrides && id === "padrao") {
+      if (field === "name") return;
+      if (field === "percent") {
+        setFeeConfig((prev) => ({
+          ...prev,
+          default: { ...prev.default, percent: Number(value) || 0 }
+        }));
+        return;
+      }
+      setFeeConfig((prev) => ({
+        ...prev,
+        default: { ...prev.default, fixed: Number(value) || 0 }
+      }));
+      return;
+    }
+
+    setFeeConfig((prev) => ({
+      ...prev,
+      overrides: prev.overrides.map((item) => {
+        if (item.id !== id) return item;
+        if (field === "name") return { ...item, name: value };
+        if (field === "percent") return { ...item, percent: Number(value) || 0 };
+        return { ...item, fixed: Number(value) || 0 };
+      })
+    }));
+  }
+
+  function addMarketplace() {
+    setFeeConfig((prev) => {
+      if (prev.overrides.length === 0) {
+        return {
+          ...prev,
+          overrides: [
+            {
+              id: makeMarketplaceId(),
+              name: "Marketplace 1",
+              percent: Number(prev.default.percent) || 0,
+              fixed: Number(prev.default.fixed) || 0
+            }
+          ]
+        };
+      }
+
+      const nextIndex = prev.overrides.length + 1;
+      return {
+        ...prev,
+        overrides: [
+          ...prev.overrides,
+          {
+            id: makeMarketplaceId(),
+            name: `Marketplace ${nextIndex}`,
+            percent: 0,
+            fixed: 0
+          }
+        ]
+      };
+    });
+  }
+
+  function removeMarketplace(id: string) {
+    setFeeConfig((prev) => ({
+      ...prev,
+      overrides: prev.overrides.filter((item) => item.id !== id)
+    }));
   }
 
   function removeMaterial(id: string) {
@@ -678,6 +755,9 @@ export function PricingPage() {
         <section id="pricing-marketplaces" className="soft-panel pricing-stage">
           <div className="section-head row-between">
             <p>Marketplaces</p>
+            <button type="button" className="ghost-btn" onClick={addMarketplace}>
+              + Adicionar marketplace
+            </button>
           </div>
 
           {loadingConfig && <p className="page-text">Carregando taxas do Supabase...</p>}
@@ -687,20 +767,58 @@ export function PricingPage() {
               <thead>
                 <tr>
                   <th>Canal</th>
+                  <th>Taxa %</th>
+                  <th>Taxa fixa</th>
                   <th>Taxa</th>
                   <th>Receita liquida</th>
                   <th>Lucro</th>
                   <th>Margem</th>
+                  <th>Acoes</th>
                 </tr>
               </thead>
               <tbody>
                 {channelPreview.map((c) => (
                   <tr key={c.id}>
-                    <td>{c.name}</td>
+                    <td>
+                      <input
+                        className="table-input"
+                        value={c.name}
+                        onChange={(e) => updateMarketplace(c.id, "name", e.target.value)}
+                        disabled={c.id === "padrao" && feeConfig.overrides.length === 0}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="table-input"
+                        type="number"
+                        step="0.01"
+                        value={c.percent}
+                        onChange={(e) => updateMarketplace(c.id, "percent", e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="table-input"
+                        type="number"
+                        step="0.01"
+                        value={c.fixed}
+                        onChange={(e) => updateMarketplace(c.id, "fixed", e.target.value)}
+                      />
+                    </td>
                     <td>{money(c.fee)}</td>
                     <td>{money(c.net)}</td>
                     <td className={c.profit >= 0 ? "profit-up" : "profit-down"}>{money(c.profit)}</td>
                     <td>{c.margin.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="danger-btn"
+                        disabled={feeConfig.overrides.length === 0}
+                        onClick={() => removeMarketplace(c.id)}
+                      >
+                        Excluir
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
