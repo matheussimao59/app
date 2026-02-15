@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SaaS Financeiro + Precificação</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        .step-content { display: none; animation: fadeIn 0.3s ease-in-out; }
+        .step-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        .modal-overlay {
+            background-color: rgba(0,0,0,0.5);
+            backdrop-filter: blur(5px);
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #c7c7c7; border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #a0a0a0; }
+
+        .nav-item.active {
+            background-color: #3730a3;
+            color: white;
+            border-left: 4px solid #818cf8;
+        }
+
+        .filter-btn.active {
+            background-color: #4f46e5;
+            color: white;
+            border-color: #4f46e5;
+        }
+
+        .wizard-help {
+            font-size: 0.85rem;
+            color: #6b7280;
+            margin-bottom: 1rem;
+            line-height: 1.4;
+            background-color: #f9fafb;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            border-left: 3px solid #818cf8;
+        }
+        
+        .active-cal-tab {
+            border-bottom-width: 2px;
+            border-color: #db2777; /* pink-600 */
+            color: #db2777;
+        }
+
+        #sidebar {
+            transition: transform 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans text-gray-800">
+
+    <!-- INPUTS INVISÍVEIS -->
+    <input type="file" id="fileInputSales" accept=".csv" class="hidden" onchange="importData(this.files[0])">
+    <input type="file" id="fileInputReconciliation" accept=".csv" class="hidden" onchange="importIncomeReport(this.files[0])">
+    <input type="file" id="fileInputCalendarArt" accept="image/*" class="hidden" onchange="handleCalendarImageUpload(this.files[0])">
+    <input type="file" id="fileInputMockupTemplate" accept="image/*" class="hidden" onchange="handleMockupTemplateUpload(this.files[0])">
+    <input type="file" id="fileInputProductImage" accept="image/*" class="hidden" onchange="handleProductImageUpload(this.files[0])">
+
+    <datalist id="materialsDatalist"></datalist>
+
+    <!-- MODAL DE PROGRESSO -->
+    <div id="progressModal" class="fixed inset-0 z-[70] flex items-center justify-center p-4 modal-overlay hidden">
+        <div class="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full text-center">
+            <h3 class="text-lg font-bold text-gray-800 mb-2" id="progressTitle">Processando...</h3>
+            <p class="text-sm text-gray-500 mb-4" id="progressText">Aguarde um momento</p>
+            <div class="w-full bg-gray-200 rounded-full h-4 mb-4 overflow-hidden">
+                <div id="progressBarFill" class="bg-indigo-600 h-4 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <div id="progressLog" class="text-xs text-left h-24 overflow-y-auto bg-gray-50 p-2 rounded border border-gray-100 font-mono text-gray-600">Iniciando...</div>
+            <button id="closeProgressBtn" onclick="document.getElementById('progressModal').classList.add('hidden');" class="mt-4 bg-gray-800 text-white px-4 py-2 rounded text-sm font-bold hidden w-full">Fechar</button>
+        </div>
+    </div>
+
+    <!-- MODAL DE AUTENTICAÇÃO -->
+    <div id="authModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay">
+        <div class="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full">
+            <div class="text-center mb-6">
+                <h2 class="text-2xl font-bold text-indigo-900">Financeiro Pro</h2>
+                <p class="text-gray-500 text-sm">Faça login para acessar seus dados.</p>
+            </div>
+            <form onsubmit="event.preventDefault(); handleLogin();" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Email</label>
+                    <input type="email" id="emailInput" name="email" autocomplete="username" required class="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Senha</label>
+                    <input type="password" id="passwordInput" name="password" autocomplete="current-password" required class="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <input type="checkbox" id="rememberMe" checked class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+                        <label for="rememberMe" class="ml-2 block text-sm text-gray-900">Manter conectado</label>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button type="submit" class="flex-1 bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700 transition font-bold shadow-md">Entrar</button>
+                    <button type="button" onclick="handleSignUp()" class="flex-1 bg-white border border-indigo-600 text-indigo-600 py-2 rounded hover:bg-indigo-50 transition font-bold">Cadastrar</button>
+                </div>
+                <button type="button" onclick="enableOfflineMode()" id="btnOfflineMode" class="hidden w-full bg-gray-800 text-white py-2 rounded mt-2 hover:bg-gray-900 transition font-bold shadow-md text-sm"><i class="fas fa-wifi-slash mr-2"></i>Entrar em Modo Offline (Demo)</button>
+
+                <div class="flex gap-2 mt-4 pt-4 border-t border-gray-100">
+                    <button type="button" onclick="resetSessionAndReload()" class="flex-1 bg-gray-100 text-gray-600 py-1.5 rounded hover:bg-gray-200 transition text-xs font-medium">Resetar sessão</button>
+                    <button type="button" onclick="showAuthHelp()" class="flex-1 bg-white border border-gray-200 text-gray-500 py-1.5 rounded hover:bg-gray-50 transition text-xs font-medium">Ajuda</button>
+                </div>
+                <p id="authError" class="text-red-500 text-xs text-center mt-2 hidden"></p>
+                <p id="authInfo" class="text-gray-500 text-xs text-center mt-2 hidden"></p>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL IMPORTAÇÃO PEDIDO MANUAL -->
+    <div id="importModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay hidden">
+        <div class="bg-white rounded-xl shadow-2xl p-6 max-w-lg w-full">
+            <h3 class="text-xl font-bold text-gray-800 mb-4">Adicionar Pedido Manualmente</h3>
+            <div class="grid grid-cols-2 gap-4">
+                <div class="col-span-2"><label class="block text-xs font-bold text-gray-700">ID do Pedido</label><input type="text" id="newOrderId" class="w-full p-2 border rounded"></div>
+                <div><label class="block text-xs font-bold text-gray-700">Valor Venda (R$)</label><input type="number" step="0.01" id="newOrderValue" class="w-full p-2 border rounded"></div>
+                <div><label class="block text-xs font-bold text-gray-700">A Receber (Previsto)</label><input type="number" step="0.01" id="newOrderExpected" class="w-full p-2 border rounded"></div>
+                <div><label class="block text-xs font-bold text-gray-700">Data Envio</label><input type="date" id="newOrderDate" class="w-full p-2 border rounded"></div>
+                <div><label class="block text-xs font-bold text-gray-700">Marketplace</label><select id="newOrderMarketplace" class="w-full p-2 border rounded bg-white"><option value="Shopee">Shopee</option><option value="Mercado Livre">Mercado Livre</option><option value="Amazon">Amazon</option><option value="Elo7">Elo7</option><option value="Outro">Outro</option></select></div>
+            </div>
+            <div class="mt-6 flex justify-end gap-2"><button onclick="document.getElementById('importModal').classList.add('hidden')" class="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded">Cancelar</button><button onclick="saveManualOrder()" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Salvar Pedido</button></div>
+        </div>
+    </div>
+
+    <!-- MODAL NOVO CALENDÁRIO -->
+    <div id="newCalendarModal" class="fixed inset-0 z-[65] flex items-center justify-center p-4 modal-overlay hidden">
+        <div class="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full">
+            <h3 class="text-xl font-bold text-gray-800 mb-4">Novo Calendário</h3>
+            <div class="space-y-4">
+                <div><label class="block text-xs font-bold text-gray-700 mb-1">ID do Pedido</label><input type="text" id="calendarOrderIdInput" placeholder="Ex: 240501ABC" class="w-full p-2 border rounded"></div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1">Arte do Calendário</label>
+                    <div onclick="document.getElementById('fileInputCalendarArt').click()" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:bg-gray-50 transition relative overflow-hidden">
+                        <div id="calendarUploadPlaceholder"><i class="fas fa-image text-3xl text-gray-400 mb-2"></i><p class="text-sm text-gray-500" id="calendarFileName">Clique para selecionar imagem</p></div>
+                        <img id="calendarPreviewImage" src="" class="hidden h-full w-full object-contain absolute inset-0 bg-gray-50">
+                    </div>
+                    <input type="hidden" id="calendarBase64Input">
+                    <div id="calendarRotationControls" class="hidden flex justify-center gap-3 mt-2">
+                        <button onclick="rotatePreview(-90)" class="bg-gray-200 hover:bg-gray-300 text-gray-700 p-2 rounded-full w-10 h-10 flex items-center justify-center transition" title="Girar Esquerda"><i class="fas fa-undo"></i></button>
+                        <button onclick="rotatePreview(90)" class="bg-gray-200 hover:bg-gray-300 text-gray-700 p-2 rounded-full w-10 h-10 flex items-center justify-center transition" title="Girar Direita"><i class="fas fa-redo"></i></button>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-2"><button onclick="document.getElementById('newCalendarModal').classList.add('hidden')" class="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded">Cancelar</button><button onclick="saveCalendarOrder()" class="px-4 py-2 bg-pink-600 text-white rounded hover:bg-pink-700 font-bold">Salvar Arte</button></div>
+        </div>
+    </div>
+
+    <!-- MODAL MEUS PRODUTOS -->
+    <div id="productsModal" class="fixed inset-0 z-[80] flex items-center justify-center p-4 modal-overlay hidden">
+        <div class="bg-white rounded-xl shadow-2xl p-4 md:p-6 max-w-5xl w-full max-h-[90vh] h-full md:h-[85vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-bold text-gray-800">Meus Produtos</h3><button onclick="document.getElementById('productsModal').classList.add('hidden')" class="text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></button></div>
+            <div class="mb-4"><input type="text" id="productSearchInput" onkeyup="filterProducts()" placeholder="Buscar produto..." class="w-full p-2 border rounded-lg"></div>
+            <!-- Grid agora exibe cards simples -->
+            <div id="productsGrid" class="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 overflow-y-auto custom-scrollbar flex-1 p-1"></div>
+            <div id="noProductsMsg" class="hidden text-center py-10 text-gray-500"><i class="fas fa-box-open text-4xl mb-3 opacity-50"></i><p>Nenhum produto encontrado.</p></div>
+            <div class="mt-4 pt-4 border-t flex justify-end"><button onclick="document.getElementById('productsModal').classList.add('hidden'); cancelEditProduct(); switchModule('pricing')" class="w-full md:w-auto bg-indigo-600 text-white px-4 py-3 md:py-2 rounded hover:bg-indigo-700 font-bold"><i class="fas fa-plus mr-2"></i> Criar Novo Produto</button></div>
+        </div>
+    </div>
+
+    <!-- MODAL: VISUALIZAR DETALHES DO PRODUTO -->
+    <div id="productViewModal" class="fixed inset-0 z-[90] flex items-center justify-center p-4 modal-overlay hidden">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+            <div class="flex justify-between items-center p-4 border-b bg-gray-50">
+                <h3 class="font-bold text-lg text-gray-800" id="viewProductTitle">Detalhes</h3>
+                <button onclick="document.getElementById('productViewModal').classList.add('hidden')" class="text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            
+            <!-- Abas do Modal -->
+            <div class="flex border-b border-gray-200 px-4">
+                <button onclick="switchProductViewTab('details')" id="tab-prod-details" class="py-2 px-4 text-sm font-bold text-indigo-600 border-b-2 border-indigo-600 focus:outline-none">Detalhes</button>
+                <button onclick="switchProductViewTab('history')" id="tab-prod-history" class="py-2 px-4 text-sm font-bold text-gray-500 hover:text-indigo-600 focus:outline-none">Histórico</button>
+            </div>
+
+            <div id="viewProductContent" class="p-4 overflow-y-auto custom-scrollbar flex-1 space-y-4 text-sm">
+                <!-- Conteúdo injetado via JS -->
+            </div>
+            <div id="viewProductHistory" class="hidden p-4 overflow-y-auto custom-scrollbar flex-1 space-y-4 text-sm bg-gray-50">
+                <!-- Timeline injetada via JS -->
+            </div>
+
+            <div class="p-4 border-t bg-gray-50 flex gap-2">
+                <button id="btnViewEdit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold text-sm shadow-sm"><i class="fas fa-pencil-alt mr-2"></i> Editar</button>
+                <button id="btnViewDelete" class="flex-1 bg-white border border-red-200 text-red-600 hover:bg-red-50 py-3 rounded-lg font-bold text-sm shadow-sm"><i class="fas fa-trash mr-2"></i> Excluir</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL GERENCIAR MATERIAIS -->
+    <div id="materialsModal" class="fixed inset-0 z-[85] flex items-center justify-center p-4 modal-overlay hidden">
+        <div class="bg-white rounded-xl shadow-2xl p-6 max-w-3xl w-full max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                <div>
+                    <h3 class="text-xl font-bold text-gray-800">Biblioteca de Materiais</h3>
+                    <p class="text-xs text-gray-500">Cadastre suas compras para calcular o custo unitário exato.</p>
+                </div>
+                <button onclick="document.getElementById('materialsModal').classList.add('hidden'); cancelEditMaterial()" class="text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto custom-scrollbar p-1">
+                <div class="bg-indigo-50 p-4 rounded-lg border border-indigo-100 mb-6">
+                    <div class="flex justify-between items-center mb-3">
+                        <h4 class="text-sm font-bold text-indigo-800" id="materialFormTitle"><i class="fas fa-plus-circle mr-2"></i>Registrar Nova Compra</h4>
+                        <span id="finalUnitCostDisplay" class="bg-white text-indigo-700 text-xs font-bold px-3 py-1 rounded-full border border-indigo-100 shadow-sm hidden">Unit: R$ 0,00</span>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 mb-3">
+                        <div class="md:col-span-6"><label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Nome do Material</label><input type="text" id="newLibMaterialName" placeholder="Ex: Papel Fotográfico" class="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-indigo-200 outline-none"></div>
+                        <div class="md:col-span-3"><label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Unidade</label><select id="newLibMaterialUnit" class="w-full p-2 border rounded text-sm bg-white outline-none"><option value="un">Unidade (un)</option><option value="kg">Quilo (kg)</option><option value="g">Grama (g)</option><option value="l">Litro (l)</option><option value="ml">Mililitro (ml)</option><option value="m">Metro (m)</option><option value="cm">Centímetro (cm)</option><option value="folha">Folha</option><option value="pct">Pacote</option></select></div>
+                        <div class="md:col-span-3"><label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Data Compra</label><input type="date" id="newLibMaterialDate" class="w-full p-2 border rounded text-sm bg-white outline-none"></div>
+                         <div class="md:col-span-6"><label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Valor Total Pago (R$)</label><input type="number" step="0.01" id="newLibMaterialTotalPrice" placeholder="Quanto custou a nota?" class="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-indigo-200 outline-none" oninput="calcMaterialUnitCost()"></div>
+                        <div class="md:col-span-6"><label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Quantidade Comprada</label><input type="number" step="0.01" id="newLibMaterialQty" placeholder="Quantos vieram?" class="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-indigo-200 outline-none" oninput="calcMaterialUnitCost()"></div>
+                    </div>
+                    <div class="flex justify-end gap-2 pt-2"><button id="btnCancelEditMaterial" onclick="cancelEditMaterial()" class="hidden px-4 py-2 border border-gray-300 text-gray-600 rounded text-sm font-bold hover:bg-white transition">Cancelar</button><button id="btnSaveMaterial" onclick="saveMaterialToLibrary()" class="bg-indigo-600 text-white px-6 py-2 rounded text-sm font-bold hover:bg-indigo-700 transition shadow-sm w-full md:w-auto">Adicionar ao Estoque</button></div>
+                </div>
+
+                <div id="materialHistorySection" class="hidden mb-6 animate-[fadeIn_0.3s]">
+                    <h5 class="text-xs font-bold text-gray-500 uppercase mb-2 ml-1"><i class="fas fa-history mr-1"></i> Histórico de Preços</h5>
+                    <div class="bg-gray-50 rounded-lg border border-gray-200 p-4 max-h-48 overflow-y-auto custom-scrollbar"><div class="relative border-l-2 border-gray-200 ml-3 pl-6 space-y-4" id="historyTimelineContainer"></div></div>
+                </div>
+
+                <div><h4 class="text-sm font-bold text-gray-700 mb-3 ml-1">Materiais Cadastrados</h4><table class="w-full text-left text-sm border-collapse"><thead class="bg-white sticky top-0 border-b-2 border-gray-100 text-gray-400 uppercase text-[10px]"><tr><th class="py-2 px-2 font-bold">Material</th><th class="py-2 px-2 font-bold w-24">Último Custo</th><th class="py-2 px-2 font-bold w-20 text-right">Ações</th></tr></thead><tbody id="materialsLibraryList" class="divide-y divide-gray-100 text-gray-600"></tbody></table></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL CALIBRAR -->
+    <div id="mockupCalibrateModal" class="fixed inset-0 z-[90] flex items-center justify-center p-4 modal-overlay hidden">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[92vh]">
+            <div class="px-6 py-4 border-b bg-gray-50 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div><h3 class="text-lg font-extrabold text-gray-900"><i class="fas fa-crosshairs mr-2"></i>Calibração de Mockup</h3></div>
+                <div class="flex flex-wrap gap-2 items-center">
+                    <div class="flex gap-2"><button id="btnCalibLeft" onclick="setCalibSide('left')" class="px-3 py-2 rounded-lg text-sm font-bold bg-indigo-600 text-white">Esquerda</button><button id="btnCalibRight" onclick="setCalibSide('right')" class="px-3 py-2 rounded-lg text-sm font-bold bg-white border border-gray-300 text-gray-700">Direita</button></div>
+                    <div class="flex gap-2"><button id="btnModeQuad" onclick="setCalibMode('quad')" class="px-3 py-2 rounded-lg text-sm font-bold bg-gray-900 text-white">4 pontos</button><button id="btnModeRect" onclick="setCalibMode('rect')" class="px-3 py-2 rounded-lg text-sm font-bold bg-white border border-gray-300 text-gray-700">Retângulo</button></div>
+                    <button onclick="clearCalibSelection()" class="px-3 py-2 rounded-lg text-sm font-bold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50">Limpar</button><button onclick="applyCalibSelection()" class="px-4 py-2 rounded-lg text-sm font-bold bg-green-600 text-white hover:bg-green-700">Aplicar</button><button onclick="closeMockupCalibrator()" class="px-4 py-2 rounded-lg text-sm font-bold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50">Fechar</button>
+                </div>
+            </div>
+            <div class="bg-yellow-50 px-6 py-2 border-b border-yellow-100 text-xs text-yellow-800 flex items-center">
+                <i class="fas fa-info-circle mr-2 text-yellow-600"></i>
+                <b>IMPORTANTE:</b> Clique para adicionar. <b>Arraste</b> para ajustar. Ordem:
+                <span class="ml-2 font-bold bg-white px-2 py-0.5 rounded border border-yellow-200">1. Sup. Esq</span>
+                <span class="ml-1 font-bold bg-white px-2 py-0.5 rounded border border-yellow-200">2. Sup. Dir</span>
+                <span class="ml-1 font-bold bg-white px-2 py-0.5 rounded border border-yellow-200">3. Inf. Dir</span>
+                <span class="ml-1 font-bold bg-white px-2 py-0.5 rounded border border-yellow-200">4. Inf. Esq</span>
+            </div>
+            <div class="p-4 flex-1 overflow-auto">
+                <div class="w-full overflow-auto bg-gray-100 rounded-xl border border-gray-200 p-3"><canvas id="mockupCalibrateCanvas" class="max-w-full h-auto rounded-lg bg-white shadow-sm cursor-crosshair"></canvas></div>
+                <div class="mt-3 text-xs text-gray-600"><span class="font-bold">Status:</span> <span id="mockupCalibrateStatus">Carregando template...</span></div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- APP CONTAINER -->
+    <div id="appContainer" class="flex h-screen overflow-hidden hidden">
+        <!-- OVERLAY MENU MOBILE -->
+        <div id="mobileMenuOverlay" onclick="toggleMobileMenu()" class="fixed inset-0 bg-black bg-opacity-50 z-20 hidden md:hidden"></div>
+
+        <!-- MENU LATERAL -->
+        <aside id="sidebar" class="w-64 bg-indigo-900 text-white fixed inset-y-0 left-0 transform -translate-x-full md:relative md:translate-x-0 transition duration-200 ease-in-out z-30 flex flex-col shadow-xl">
+            <div class="p-6 text-2xl font-bold border-b border-indigo-800 flex items-center gap-2 justify-between md:justify-start">
+                <div class="flex items-center gap-2"><i class="fas fa-chart-line"></i> <span>Financeiro Pro</span></div>
+                <button onclick="toggleMobileMenu()" class="md:hidden text-indigo-300 hover:text-white"><i class="fas fa-times"></i></button>
+            </div>
+            <nav class="flex-1 p-4 space-y-2">
+                <a href="#" onclick="if(window.innerWidth < 768) toggleMobileMenu(); switchModule('dashboard')" id="nav-dashboard" class="nav-item active block py-3 px-4 rounded transition hover:bg-indigo-800 text-indigo-100"><i class="fas fa-tachometer-alt mr-3 w-5"></i> Dashboard</a>
+                <a href="#" onclick="if(window.innerWidth < 768) toggleMobileMenu(); switchModule('pricing')" id="nav-pricing" class="nav-item block py-3 px-4 rounded transition hover:bg-indigo-800 text-indigo-100"><i class="fas fa-calculator mr-3 w-5"></i> Precificação</a>
+                <a href="#" onclick="if(window.innerWidth < 768) toggleMobileMenu(); switchModule('calendar')" id="nav-calendar" class="nav-item block py-3 px-4 rounded transition hover:bg-indigo-800 text-indigo-100"><i class="fas fa-calendar-alt mr-3 w-5"></i> Gerar Calendário</a>
+                <a href="#" onclick="if(window.innerWidth < 768) toggleMobileMenu(); openProductsModal()" class="nav-item block py-3 px-4 rounded transition hover:bg-indigo-800 text-indigo-100"><i class="fas fa-boxes mr-3 w-5"></i> Meus Produtos</a>
+                <a href="#" onclick="if(window.innerWidth < 768) toggleMobileMenu(); switchModule('settings')" id="nav-settings" class="nav-item block py-3 px-4 rounded transition hover:bg-indigo-800 text-indigo-100"><i class="fas fa-cog mr-3 w-5"></i> Configurações</a>
+                <div class="pt-8 border-t border-indigo-800 mt-8">
+                    <p class="px-4 text-xs text-indigo-400 uppercase font-bold mb-2">Conta</p>
+                    <a href="#" onclick="logout()" class="block py-2 px-4 rounded hover:bg-red-700 transition text-sm text-gray-300"><i class="fas fa-sign-out-alt mr-3"></i> Sair</a>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- CONTEÚDO PRINCIPAL -->
+        <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 p-6 relative">
+             <header class="mb-6 flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <button onclick="toggleMobileMenu()" class="md:hidden text-gray-600 focus:outline-none p-2 rounded hover:bg-gray-200">
+                        <i class="fas fa-bars text-xl"></i>
+                    </button>
+                    <div>
+                        <h1 id="pageTitle" class="text-xl md:text-3xl font-bold text-gray-800">Dashboard Financeiro</h1>
+                        <p id="pageSubtitle" class="text-xs md:text-sm text-gray-600 hidden md:block">Visão geral dos seus recebíveis e pedidos.</p>
+                        <p id="offlineModeIndicator" class="hidden text-xs font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded inline-block mt-1"><i class="fas fa-wifi mr-1"></i> Modo Offline / Demo</p>
+                    </div>
+                </div>
+                <div class="text-sm text-gray-500 text-right"><div class="text-xs">Logado como:</div><span id="userDisplay" class="font-bold text-indigo-600">...</span></div>
+            </header>
+
+            <div id="module-dashboard" class="space-y-6">
+                 <div class="flex items-center justify-between"><h3 class="text-sm font-bold text-gray-500 uppercase tracking-wider">Resumo Financeiro <span id="periodLabel" class="ml-2 bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-xs normal-case">Todo o período</span></h3></div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition"><div><p class="text-xs font-bold text-gray-500 uppercase">Total Vendido</p><h3 id="kpiTotalSold" class="text-2xl font-bold text-gray-800 mt-1">R$ 0,00</h3></div><div class="mt-4 text-xs text-gray-400">Bruto (período selecionado)</div></div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition"><div><p class="text-xs font-bold text-gray-500 uppercase">A Receber</p><h3 id="kpiToReceive" class="text-2xl font-bold text-orange-500 mt-1">R$ 0,00</h3></div><div class="mt-4 text-xs text-orange-400 font-semibold">Previsão pendente</div></div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition"><div><p class="text-xs font-bold text-gray-500 uppercase">Total Recebido (Líquido)</p><h3 id="kpiPaid" class="text-2xl font-bold text-green-600 mt-1">R$ 0,00</h3></div><div id="diffIndicatorContainer" class="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs hidden"><span class="text-gray-500 font-medium">Diferença:</span><span id="kpiDiffTotal" class="font-bold text-gray-400">R$ 0,00</span></div></div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition"><div><p class="text-xs font-bold text-gray-500 uppercase">Lucro Bruto Est.</p><h3 id="kpiProfit" class="text-2xl font-bold text-indigo-600 mt-1">R$ 0,00</h3></div><div class="mt-4 text-xs text-gray-400">Recebido - Custo Prod.</div></div>
+                </div>
+                <div class="flex flex-wrap gap-4 justify-between items-center bg-white p-4 rounded-xl border border-gray-200 shadow-sm sticky top-0 z-10">
+                    <div class="flex gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
+                        <button onclick="document.getElementById('importModal').classList.remove('hidden')" class="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 whitespace-nowrap"><i class="fas fa-plus"></i> Novo Manual</button>
+                        <button onclick="repairInconsistentData()" class="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-sm whitespace-nowrap"><i class="fas fa-wrench"></i> Reparar</button>
+                        <button onclick="document.getElementById('fileInputSales').click()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-sm whitespace-nowrap"><i class="fas fa-file-import"></i> Importar</button>
+                        <button onclick="document.getElementById('fileInputReconciliation').click()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-sm whitespace-nowrap"><i class="fas fa-file-invoice-dollar"></i> Conciliar</button>
+                    </div>
+                    <div class="flex items-center gap-2 bg-gray-50 p-2 rounded-lg border w-full md:w-auto">
+                        <span class="text-sm text-gray-500 font-bold whitespace-nowrap"><i class="fas fa-filter mr-1"></i> Mês:</span>
+                        <input type="month" id="filterMonth" class="border rounded p-1 text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-200 w-full md:w-auto" onchange="loadDashboardData()">
+                        <button onclick="document.getElementById('filterMonth').value=''; loadDashboardData()" class="text-gray-400 hover:text-red-500 p-1"><i class="fas fa-times"></i></button>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-100 flex flex-col md:flex-row justify-between items-center bg-gray-50 gap-4">
+                        <h3 class="font-bold text-gray-800">Listagem de Pedidos</h3>
+                        <div class="flex items-center gap-4 flex-wrap justify-end w-full md:w-auto">
+                            <div class="flex bg-white rounded-lg border p-1 shadow-sm">
+                                <button onclick="setFilter('all')" id="btn-filter-all" class="filter-btn active px-4 py-1.5 text-sm font-medium rounded-md transition-colors text-gray-600 hover:bg-gray-100">Todos</button>
+                                <button onclick="setFilter('pending')" id="btn-filter-pending" class="filter-btn px-4 py-1.5 text-sm font-medium rounded-md transition-colors text-gray-600 hover:bg-gray-100">Pendentes</button>
+                                <button onclick="setFilter('paid')" id="btn-filter-paid" class="filter-btn px-4 py-1.5 text-sm font-medium rounded-md transition-colors text-gray-600 hover:bg-gray-100">Pagos</button>
+                            </div>
+                            <button onclick="exportPaidOrdersToCSV()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 text-sm font-medium rounded-md transition-colors flex items-center gap-2 shadow-sm"><i class="fas fa-file-csv"></i> Exportar</button>
+                            <div class="bg-indigo-50 px-4 py-2 rounded-lg border border-indigo-100 flex items-center gap-2"><span class="text-xs font-bold text-indigo-400 uppercase">Total:</span><span id="visibleTotalDisplay" class="font-bold text-lg text-indigo-700">R$ 0,00</span></div>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-white text-xs text-gray-500 uppercase border-b"><tr><th class="px-6 py-3">Data</th><th class="px-6 py-3">ID Pedido</th><th class="px-6 py-3">Venda</th><th class="px-6 py-3 bg-blue-50 text-blue-800">Previsto</th><th class="px-6 py-3 bg-green-50 text-green-800">Pago</th><th class="px-6 py-3">Status</th><th class="px-6 py-3 text-center">Diferença</th><th class="px-6 py-3 text-right">Ações</th></tr></thead>
+                            <tbody id="ordersTableBody" class="divide-y divide-gray-100 text-sm"><tr><td colspan="8" class="text-center py-8 text-gray-400">Carregando dados...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="module-calendar" class="hidden space-y-6">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-xl shadow-sm border border-gray-100 gap-4">
+                    <div><h2 class="text-2xl font-bold text-gray-800"><i class="fas fa-print text-pink-500 mr-2"></i> Fluxo de Impressão</h2><p class="text-gray-500 text-sm">Gerencie as artes, gere PDFs e controle o status de impressão.</p></div>
+                    <div class="flex flex-col sm:flex-row gap-2 w-full md:w-auto"><div id="mockupConfigButtonWrap"><button onclick="toggleMockupConfigPanel()" class="w-full sm:w-auto bg-gray-900 hover:bg-gray-800 text-white px-4 py-3 rounded-lg font-bold shadow-lg flex items-center justify-center gap-2 transition"><i class="fas fa-camera-retro"></i> Configurar Mockup</button></div><button onclick="openNewCalendarModal()" class="w-full sm:w-auto bg-pink-600 hover:bg-pink-700 text-white px-6 py-3 rounded-lg font-bold shadow-lg flex items-center justify-center gap-2 transition"><i class="fas fa-plus-circle"></i> Novo Calendário</button></div>
+                </div>
+                <div id="mockupConfigPanel" class="hidden bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4"><div><h3 class="text-lg font-bold text-gray-800">Padrão do Mockup</h3><p class="text-sm text-gray-500">Defina a imagem padrão do mockup e as coordenadas.</p></div><button onclick="toggleMockupConfigPanel(false)" class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-bold text-sm"><i class="fas fa-times mr-2"></i> Fechar</button></div>
+                    <div class="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="space-y-3">
+                            <label class="block text-xs font-bold text-gray-700">Template</label>
+                            <div onclick="document.getElementById('fileInputMockupTemplate').click()" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer"><i class="fas fa-image text-3xl text-gray-400 mb-2"></i><p class="text-sm text-gray-500" id="mockupTemplateFileName">Clique para selecionar</p></div>
+                            <input type="hidden" id="mockupTemplateBase64Input">
+                            <div id="mockupTemplatePreviewContainer" class="hidden bg-gray-50 p-3 rounded border border-gray-100"><p class="text-xs text-gray-500 mb-2">Pré-visualização do template:</p><img id="mockupTemplatePreviewImage" src="" class="w-full rounded-lg border shadow-sm object-contain max-h-64"></div>
+                        </div>
+                        <div class="space-y-3"><label class="block text-xs font-bold text-gray-700">Config JSON</label><textarea id="mockupConfigJsonTextarea" class="w-full h-64 p-3 border rounded-lg font-mono text-xs"></textarea></div>
+                    </div>
+                    <div class="mt-5 flex flex-wrap gap-2 justify-end"><button onclick="resetMockupConfigToDefault()" class="bg-white border text-gray-700 px-4 py-2 rounded-lg text-sm font-bold">Restaurar Padrão</button><button onclick="openMockupCalibrator('left')" class="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-bold">Marcar Capas</button><button onclick="saveGlobalMockupConfig()" class="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-bold">Salvar</button></div>
+                </div>
+                <div class="flex gap-4 border-b border-gray-200"><button onclick="setCalendarFilter(false)" id="tab-calendar-todo" class="px-6 py-3 font-bold text-pink-600 border-b-2 border-pink-600">A Fazer</button><button onclick="setCalendarFilter(true)" id="tab-calendar-done" class="px-6 py-3 font-bold text-gray-600">Impresso</button></div>
+                <div id="calendarGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"><div class="col-span-full text-center py-12 text-gray-400">Carregando...</div></div>
+            </div>
+
+            <div id="module-pricing" class="hidden">
+                 <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                    <div class="bg-white px-6 py-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
+                        <h2 class="text-xl font-bold text-gray-800" id="pricingTitle">Precificação</h2>
+                        <div class="flex gap-2 w-full sm:w-auto flex-wrap sm:flex-nowrap">
+                             <button onclick="cancelEditProduct()" id="btnCancelEditProduct" class="hidden bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold hover:bg-gray-300 flex-1 sm:flex-none">Cancelar</button>
+                            <button onclick="openMaterialsModal()" class="bg-white border text-gray-700 px-4 py-2 rounded-lg text-sm font-bold flex-1 sm:flex-none">Materiais</button>
+                            <button onclick="openProductsModal()" class="bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg text-sm font-bold flex-1 sm:flex-none">Meus Produtos</button>
+                        </div>
+                    </div>
+                    <div class="p-6 border-b bg-gray-50">
+                        <div class="flex flex-col md:flex-row gap-4"><div class="flex-1"><label class="block text-sm font-bold text-gray-700 mb-1">Nome do Produto</label><input type="text" id="productNameInput" placeholder="Ex: Camiseta" class="w-full text-lg p-2 border-b-2 border-indigo-200 focus:border-indigo-600 outline-none bg-transparent"></div>
+                        <div class="w-full sm:w-64">
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Imagem</label>
+                            <div onclick="document.getElementById('fileInputProductImage').click()" class="border-2 border-dashed border-gray-300 rounded-lg p-3 text-center cursor-pointer bg-white"><i class="fas fa-image text-2xl text-gray-400"></i><p class="text-xs text-gray-500">Selecionar</p></div>
+                            <input type="hidden" id="productImageBase64Input">
+                            <div id="productImagePreviewContainer" class="hidden mt-2 bg-white p-2 rounded border border-gray-200"><div class="flex items-center justify-between mb-2"><p class="text-[11px] text-gray-500">Pré-visualização</p><button type="button" onclick="clearProductImage()" class="text-xs text-red-500 hover:text-red-700 font-bold">Remover</button></div><img id="productImagePreview" src="" class="w-full h-32 object-cover rounded border"></div>
+                        </div></div>
+                    </div>
+                    <div class="bg-gray-50 border-b border-gray-200 px-6 py-2"><div class="flex justify-between items-center text-xs md:text-sm font-medium text-gray-500 overflow-x-auto gap-2"><span id="step-ind-1" class="text-indigo-600">1. Materiais</span><span>...</span><span id="step-ind-6">6. Marketplaces</span></div></div>
+                    <div class="p-6 min-h-[400px]">
+                        <div id="step-1" class="step-content active">
+                            <h2 class="text-xl font-bold mb-1">Materiais</h2>
+                            <p class="wizard-help">Liste tudo o que você gasta para fazer <b>1 unidade</b> do seu produto. <br>Ex: Se você vende bolo, liste: farinha (0.2 kg), ovos (2 un).</p>
+                            <div id="materialsList" class="space-y-3 mb-4"></div>
+                            <div class="mb-4">
+                                <p class="text-[10px] uppercase font-bold text-gray-500 mb-2 tracking-wider">Materiais da Biblioteca</p>
+                                <div id="materialsQuickPick" class="flex flex-wrap gap-2"></div>
+                            </div>
+                            <button onclick="addMaterialRow()" class="text-indigo-600 text-sm font-bold mb-6">+ Adicionar linha vazia</button>
+                            <div class="flex justify-between border-t pt-4"><div class="text-lg font-bold">Total: <span id="totalMateriais" class="text-indigo-600">R$ 0,00</span></div><button onclick="nextStep(2)" class="bg-indigo-600 text-white px-6 py-2 rounded-lg">Próximo</button></div>
+                        </div>
+                        <div id="step-2" class="step-content">
+                            <h2 class="text-xl font-bold mb-1">Mão de Obra</h2>
+                            <p class="wizard-help">Quanto vale o seu tempo? Defina o salário que você gostaria de ganhar e quantas horas trabalha por mês. <br>O sistema vai calcular o custo de cada minuto que você gasta produzindo.</p>
+                            <div class="grid grid-cols-2 gap-4"><div><label>Salário Desejado</label><input type="number" id="inputSalario" class="border p-2 w-full" oninput="calcLaborHour()" placeholder="Ex: 3000,00"></div><div><label>Horas/Mês</label><input type="number" id="inputHorasMes" value="160" class="border p-2 w-full" oninput="calcLaborHour()"></div></div><input type="number" id="inputTempoProducao" class="border p-2 w-full mt-4" placeholder="Minutos gastos para produzir 1 unidade" oninput="calcStep2()"><div class="flex justify-between mt-4"><span id="totalMaoObra">R$ 0,00</span><div><button onclick="prevStep(1)" class="mr-2">Voltar</button><button onclick="nextStep(3)" class="bg-indigo-600 text-white px-4 py-2 rounded">Próximo</button></div></div>
+                        </div>
+                        <div id="step-3" class="step-content">
+                            <h2 class="text-xl font-bold mb-1">Custos Fixos</h2>
+                            <p class="wizard-help">São contas que você paga todo mês, vendendo ou não (Aluguel, Luz, MEI, Internet). <br>Defina uma porcentagem pequena (ex: 10% a 20%) para que cada venda ajude a pagar essas contas.</p>
+                            <input type="range" id="rangeCustosFixos" class="w-full" oninput="syncFixedCost(this.value)" value="10"><input type="number" id="inputCustosFixos" class="border p-2" oninput="syncFixedCost(this.value)" value="10"><span id="displayCustoFixo"> 10%</span><div class="flex justify-between mt-4"><button onclick="prevStep(2)">Voltar</button><button onclick="nextStep(4)" class="bg-indigo-600 text-white px-4 py-2 rounded">Calcular</button></div>
+                        </div>
+                        <div id="step-4" class="step-content"><h2 class="text-xl font-bold">Resumo</h2><p class="wizard-help">Este é o custo base do seu produto. Se vender abaixo disso, terá prejuízo.</p><div id="resumoCustoTotal"></div><div id="resumoMateriais"></div><div id="resumoMaoObra"></div><div id="resumoValorFixo"></div><div class="flex justify-between mt-4"><button onclick="prevStep(3)">Voltar</button><button onclick="nextStep(5)" class="bg-indigo-600 text-white px-4 py-2 rounded">Preço</button></div></div>
+                        <div id="step-5" class="step-content">
+                            <h2 class="text-xl font-bold mb-1">Margem de Lucro</h2>
+                            <p class="wizard-help">Quanto você quer ganhar "limpo" em cima do custo?</p>
+                            <input type="number" id="margemLucroInput" class="border p-2 w-full" oninput="calcPriceSuggestion()" placeholder="Ex: 50%"><div id="sugestaoPreco"></div>
+                            <label class="block mt-4 text-sm font-bold text-gray-700">Preço Final que vou cobrar:</label>
+                            <input type="number" id="precoVendaFinalInput" class="border p-2 w-full font-bold text-lg text-green-700" oninput="calcRealMargin()"><div id="lucroBrutoPct"></div><div id="lucroBrutoValor"></div><div class="flex justify-between mt-4"><button onclick="prevStep(4)">Voltar</button><button onclick="nextStep(6)" class="bg-indigo-600 text-white px-4 py-2 rounded">Finalizar</button></div>
+                        </div>
+                        <div id="step-6" class="step-content">
+                            <div class="flex justify-between items-center mb-2">
+                                <h2 class="text-xl font-bold">Marketplaces</h2>
+                                <button onclick="renderSimulatorTable()" class="text-xs text-indigo-600 font-bold hover:underline"><i class="fas fa-sync"></i> Atualizar</button>
+                            </div>
+                            <p class="wizard-help">Adicione abaixo os canais onde pretende vender. O sistema calcula o lucro líquido para cada um.</p>
+                            
+                            <div class="overflow-x-auto border rounded-xl bg-white mb-6">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="bg-gray-50 text-[10px] uppercase font-bold text-gray-400">
+                                        <tr>
+                                            <th class="p-2 md:p-4">Canal</th>
+                                            <th class="p-2 md:p-4 w-20 md:w-24">Taxa %</th>
+                                            <th class="p-2 md:p-4 w-20 md:w-24">Taxa Fixa</th>
+                                            <th class="p-2 md:p-4 w-28 md:w-32">Preço Venda</th>
+                                            <th class="p-2 md:p-4 text-right">Lucro Líquido</th>
+                                            <th class="p-2 md:p-4 w-10"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="marketplaceSimulatorBody" class="divide-y divide-gray-100"></tbody>
+                                </table>
+                                <div class="p-3 bg-gray-50 border-t flex gap-2">
+                                    <button onclick="addSimRow()" class="text-xs font-bold text-indigo-600 border border-indigo-200 bg-white px-3 py-2 rounded hover:bg-indigo-50">+ Linha Manual</button>
+                                    <button onclick="loadSimsFromConfig()" class="text-xs font-bold text-gray-600 border border-gray-200 bg-white px-3 py-2 rounded hover:bg-gray-50"><i class="fas fa-download mr-1"></i> Carregar Configs</button>
+                                </div>
+                            </div>
+                            <button onclick="saveProduct()" id="btnSaveProduct" class="bg-blue-600 text-white w-full py-3 mt-4 rounded-lg font-bold shadow-md transition-all text-lg">Salvar Produto</button>
+                            <div class="mt-4 text-center"><button onclick="prevStep(5)" class="text-gray-500 hover:text-gray-700 text-sm">Voltar</button></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="module-settings" class="hidden space-y-6">
+                 <div class="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-200 bg-gray-50"><h2 class="text-xl font-bold text-gray-800">Configurações</h2></div>
+                    <div class="p-6 space-y-6">
+                        <div><h3 class="text-sm font-bold text-gray-700 uppercase tracking-wider mb-3">Regra Padrão</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label class="block text-xs font-bold text-gray-600 mb-1">Taxa (%)</label><input type="number" id="feeDefaultPercent" step="0.01" class="w-full p-2 border rounded-lg"></div><div><label class="block text-xs font-bold text-gray-600 mb-1">Taxa fixa (R$)</label><input type="number" id="feeDefaultFixed" step="0.01" class="w-full p-2 border rounded-lg"></div></div></div>
+                        <div><div class="flex items-center justify-between gap-3"><h3 class="text-sm font-bold text-gray-700 uppercase tracking-wider">Regras por Marketplace</h3><button type="button" onclick="addFeeOverrideRow()" class="bg-white border text-gray-700 px-4 py-2 rounded-lg text-sm font-bold">+ Adicionar</button></div><div class="mt-3 space-y-2" id="feeOverridesList"></div></div>
+                        <div class="flex flex-wrap gap-2 justify-end pt-4 border-t"><button type="button" onclick="saveOrderFeeConfig()" class="bg-indigo-600 text-white px-5 py-2 rounded-lg font-bold text-sm">Salvar</button></div>
+                        <p id="feeConfigStatus" class="text-xs text-gray-500"></p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const SUPABASE_URL = 'https://xawirlorssbucawhnxeh.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhhd2lybG9yc3NidWNhd2hueGVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NzY1NzMsImV4cCI6MjA3ODU1MjU3M30.hlJGmdarLnF6IG_L1552ZVItNKBPrBB4NLhS9DacQ7c';
+        const MOCKUP_SETTINGS_ID = 'global_mockup_config_vertical_v1';
+        const MOCKUP_FALLBACK_TEMPLATE_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABAAAAAMgCAYAAACkhp+oAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAADsSURBVHhe7cExAQAAAMKg9U9tCy8gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD4GfSQAAeCt76AAAAABJRU5ErkJggg==';
+        const MOCKUP_DEFAULT_LEFT_QUAD = { tl: { x: 112, y: 60 }, tr: { x: 406, y: 60 }, br: { x: 406, y: 476 }, bl: { x: 112, y: 476 } };
+        const MOCKUP_DEFAULT_RIGHT_QUAD = { tl: { x: 620, y: 46 }, tr: { x: 914, y: 46 }, br: { x: 914, y: 528 }, bl: { x: 620, y: 528 } };
+
+        let mockupConfig = null;
+        let calibState = { side: 'left', mode: 'quad', points: [], templateImg: null, draggingIndex: -1 };
+        let supabaseClient;
+        let currentUser = null;
+        let globalOrdersCache = [];
+        let calendarOrdersCache = [];
+        let currentProductsList = [];
+        let calendarFilterPrinted = false;
+        let currentStatusFilter = 'all';
+        const ORDER_FEE_SETTINGS_ID = 'global_order_fee_config';
+        let orderFeeConfig = { default: { percent: 20, fixed: 4 }, overrides: [] };
+        let editingMaterialId = null; 
+        let editingProductId = null; 
+        let currentEditingStrategies = []; 
+        let currentMaterialsList = [];
+        let isOfflineMode = false;
+
+        function normalizeCurrency(val) { if (!val) return 0; let v = val.toString().replace(/[^\d.,-]/g, ''); if (v.includes(',') && v.includes('.')) v = v.replace(/\./g, '').replace(',', '.'); else if (v.includes(',')) v = v.replace(',', '.'); return parseFloat(v) || 0; }
+        function fmt(v) { return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+        function updateProgress(p, m) { const mod=document.getElementById('progressModal'); if(mod) { mod.classList.remove('hidden'); document.getElementById('progressBarFill').style.width = p + '%'; document.getElementById('progressText').innerText = m; } }
+        
+        function switchProductViewTab(tab) {
+            const detailsDiv = document.getElementById('viewProductContent');
+            const historyDiv = document.getElementById('viewProductHistory');
+            const tabDetails = document.getElementById('tab-prod-details');
+            const tabHistory = document.getElementById('tab-prod-history');
+
+            if (tab === 'details') {
+                detailsDiv.classList.remove('hidden');
+                historyDiv.classList.add('hidden');
+                tabDetails.className = "py-2 px-4 text-sm font-bold text-indigo-600 border-b-2 border-indigo-600 focus:outline-none";
+                tabHistory.className = "py-2 px-4 text-sm font-bold text-gray-500 hover:text-indigo-600 focus:outline-none";
+            } else {
+                detailsDiv.classList.add('hidden');
+                historyDiv.classList.remove('hidden');
+                tabDetails.className = "py-2 px-4 text-sm font-bold text-gray-500 hover:text-indigo-600 focus:outline-none";
+                tabHistory.className = "py-2 px-4 text-sm font-bold text-indigo-600 border-b-2 border-indigo-600 focus:outline-none";
+            }
+        }
+
+        function loadImageFromDataUrl(dataUrl) { return new Promise((resolve, reject) => { if (!dataUrl) return reject(new Error('URL da imagem vazia')); const safeUrl = (typeof dataUrl === 'string') ? dataUrl.trim().replace(/\s/g, '') : dataUrl; const img = new Image(); img.onload = () => resolve(img); img.onerror = () => reject(new Error('Falha ao carregar imagem.')); if (typeof safeUrl === 'string' && safeUrl.startsWith('http')) img.crossOrigin = 'anonymous'; else img.removeAttribute('crossOrigin'); img.src = safeUrl; }); }
+        async function resizeToJpegDataUrl(input, maxSize = 600, quality = 0.8) { let dataUrl = input; if (input instanceof Blob || input instanceof File) { dataUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = (e) => resolve(e.target.result); reader.onerror = reject; reader.readAsDataURL(input); }); } const img = await loadImageFromDataUrl(dataUrl); const scale = Math.min(1, maxSize / Math.max(img.width, img.height)); const w = Math.floor(img.width * scale), h = Math.floor(img.height * scale); const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h; const ctx = canvas.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h); return canvas.toDataURL('image/jpeg', quality); }
+
+        try { if (SUPABASE_URL && SUPABASE_KEY && window.supabase?.createClient) supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); } catch (e) { console.error(e); }
+
+        async function bootstrapAuth() { 
+            if (!supabaseClient) return showAuthModal('Supabase não inicializou.'); 
+            supabaseClient.auth.onAuthStateChange((event, session) => { 
+                if (event === 'SIGNED_OUT' || !session?.user) { 
+                    if(!isOfflineMode) { currentUser = null; showAuthModal('Sua sessão expirou.'); }
+                } 
+            }); 
+            
+            try { 
+                const { data, error } = await supabaseClient.auth.getSession(); 
+                if (error) { 
+                    if (error.message && (error.message.includes('fetch') || error.message.includes('network'))) {
+                         document.getElementById('btnOfflineMode').classList.remove('hidden');
+                         showAuthModal('Não foi possível conectar ao servidor. Você pode entrar em Modo Offline.');
+                         return;
+                    }
+                    if (isInvalidRefreshTokenError(error)) { clearSupabaseAuthStorage(); showAuthModal('Sessão expirada.'); return; } 
+                    return; 
+                } 
+                if (data?.session?.user) { currentUser = data.session.user; initApp(); } else showAuthModal(); 
+            } catch (e) { 
+                document.getElementById('btnOfflineMode').classList.remove('hidden');
+                showAuthModal('Erro de conexão detectado.'); 
+            } 
+        }
+
+        function enableOfflineMode() {
+            isOfflineMode = true;
+            currentUser = { id: 'offline_user', email: 'demo@offline.mode' };
+            document.getElementById('offlineModeIndicator').classList.remove('hidden');
+            initApp();
+        }
+
+        function showAuthModal(m) { document.getElementById('appContainer').classList.add('hidden'); document.getElementById('authModal').classList.remove('hidden'); if (m) document.getElementById('authInfo').innerText = m; }
+        function hideAuthModal() { document.getElementById('authModal').classList.add('hidden'); }
+        function setAuthError(m) { document.getElementById('authError').innerText = m; document.getElementById('authError').classList.remove('hidden'); }
+        function clearAuthError() { document.getElementById('authError').classList.add('hidden'); }
+        function isInvalidRefreshTokenError(err) { const msg = (err?.message || '').toLowerCase(); return msg.includes('invalid refresh token') || msg.includes('refresh token not found'); }
+        function clearSupabaseAuthStorage() { localStorage.clear(); sessionStorage.clear(); }
+        async function resetSessionAndReload() { try { await supabaseClient?.auth.signOut(); } catch {} clearSupabaseAuthStorage(); location.reload(); }
+        async function handleLogin() { 
+            clearAuthError(); 
+            if(isOfflineMode) { initApp(); return; }
+            const e = document.getElementById('emailInput').value, p = document.getElementById('passwordInput').value; 
+            const { data, error } = await supabaseClient.auth.signInWithPassword({ email: e, password: p }); 
+            if (error) {
+                if(error.message && error.message.includes('fetch')) {
+                    setAuthError('Erro de conexão. Tente "Modo Offline".');
+                    document.getElementById('btnOfflineMode').classList.remove('hidden');
+                } else {
+                    setAuthError(error.message); 
+                }
+            } else { 
+                currentUser = data.user; initApp(); 
+            } 
+        }
+        async function handleSignUp() { clearAuthError(); const e = document.getElementById('emailInput').value, p = document.getElementById('passwordInput').value; const { error } = await supabaseClient.auth.signUp({ email: e, password: p }); if (error) setAuthError(error.message); else alert("Verifique seu email."); }
+        async function logout() { await supabaseClient.auth.signOut(); clearSupabaseAuthStorage(); location.reload(); }
+        function showAuthHelp() { alert("Se vir 'Invalid Refresh Token', clique em 'Resetar sessão'."); }
+
+        function checkMaterialCost(input) {
+            const val = input.value; const row = input.closest('.material-row'); const opts = document.getElementById('materialsDatalist').options;
+            for(let i=0; i<opts.length; i++) { if(opts[i].value === val) { row.querySelector('.material-unit-cost').value = opts[i].getAttribute('data-cost'); calcMaterialRow(input); break; } }
+        }
+
+        function addMaterialRow(name='', qty=1, unitCost='', totalCost='') {
+            const c = document.getElementById('materialsList');
+            if(!c) return; 
+            const d = document.createElement('div'); d.className = "flex flex-col sm:flex-row gap-2 mb-3 sm:mb-2 material-row border-b sm:border-0 pb-3 sm:pb-0 border-gray-100 items-start sm:items-center";
+            if(totalCost !== '' && (unitCost === '' || unitCost === 0)) { unitCost = totalCost; qty = 1; }
+            d.innerHTML = `<div class="w-full sm:flex-1"><input type="text" list="materialsDatalist" placeholder="Item" class="border p-2 w-full material-name text-sm rounded-lg" value="${name}" onchange="checkMaterialCost(this)"></div><div class="flex gap-2 w-full sm:w-auto items-center"><div class="flex-1 sm:flex-none"><input type="number" step="0.01" placeholder="Qtd" class="border p-2 w-full sm:w-20 material-qty text-sm rounded-lg" value="${qty}" oninput="calcMaterialRow(this)"></div><div class="flex-1 sm:flex-none"><input type="number" step="0.01" placeholder="$ Unit" class="border p-2 w-full sm:w-24 material-unit-cost text-sm rounded-lg" value="${unitCost}" oninput="calcMaterialRow(this)"></div><div class="flex-1 sm:flex-none relative sm:w-24"><span class="absolute left-2 top-2 text-xs text-gray-400">R$</span><input type="number" step="0.01" readonly tabindex="-1" class="border p-2 w-full pl-6 material-cost bg-gray-50 text-gray-600 font-bold text-sm rounded-lg" value="${totalCost}"></div><button onclick="this.closest('.material-row').remove();calcStep1()" class="text-red-400 p-2"><i class="fas fa-trash"></i></button></div>`;
+            c.appendChild(d); if(qty && unitCost) d.querySelector('.material-cost').value = (parseFloat(qty) * parseFloat(unitCost)).toFixed(2); calcStep1(); 
+        }
+
+        function calcMaterialRow(el) { const row = el.closest('.material-row'); const q = normalizeCurrency(row.querySelector('.material-qty').value); const u = normalizeCurrency(row.querySelector('.material-unit-cost').value); const t = q * u; const ci = row.querySelector('.material-cost'); if(ci) ci.value = t.toFixed(2); calcStep1(); }
+        function calcStep1() { let t = 0; document.querySelectorAll('.material-cost').forEach(e => t += Number(e.value)); document.getElementById('totalMateriais').innerText = fmt(t); return t; }
+        function nextStep(n) { if (n === 4) calcResumoCusto(); if (n === 5) calcPriceSuggestion(); if (n === 6) renderSimulatorTable(); showStep(n); }
+        function prevStep(n) { showStep(n); }
+        function showStep(s) { document.querySelectorAll('.step-content').forEach(e => e.classList.remove('active')); document.getElementById(`step-${s}`).classList.add('active'); }
+        function calcLaborHour() { const s=normalizeCurrency(document.getElementById('inputSalario').value), h=normalizeCurrency(document.getElementById('inputHorasMes').value)||160; return h>0?s/h:0; }
+        function calcStep2() { const t=(calcLaborHour()/60)*normalizeCurrency(document.getElementById('inputTempoProducao').value); document.getElementById('totalMaoObra').innerText = fmt(t); return t; }
+        function syncFixedCost(v) { document.getElementById('rangeCustosFixos').value = v; document.getElementById('inputCustosFixos').value = v; document.getElementById('displayCustoFixo').innerText = v+'%'; }
+        function calcResumoCusto() { const mat = calcStep1(), mo = calcStep2(), fp = normalizeCurrency(document.getElementById('inputCustosFixos').value), sub = mat + mo, fv = sub * (fp/100), tot = sub + fv; document.getElementById('resumoCustoTotal').innerHTML = `<div class="flex justify-between py-3 text-lg text-indigo-700 bg-indigo-50 px-4 rounded-lg mt-2"><span>Total:</span> <span class="font-bold">${fmt(tot)}</span></div>`; return tot; }
+        function calcPriceSuggestion() { const c = calcResumoCusto(), m = normalizeCurrency(document.getElementById('margemLucroInput').value), p = m < 100 ? c / (1 - (m/100)) : 0; document.getElementById('sugestaoPreco').innerHTML = `<b>${fmt(p)}</b>`; return p; }
+        function calcRealMargin() { const c = calcResumoCusto(), v = normalizeCurrency(document.getElementById('precoVendaFinalInput').value); if(v<=0) return; const l=v-c, m=(l/v)*100; document.getElementById('lucroBrutoPct').innerHTML = `<b>${m.toFixed(2)}%</b>`; const val = v - c; document.getElementById('lucroBrutoValor').innerHTML = `<span class="text-xs text-gray-500">Lucro R$: ${fmt(val)}</span>`; }
+
+        function rotatePreview(degrees) {
+            const img = document.getElementById('calendarPreviewImage');
+            if (!img.src || img.src === window.location.href) return;
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const image = new Image();
+            image.onload = function() {
+                if (degrees === 90 || degrees === -90 || degrees === 270 || degrees === -270) { canvas.width = image.height; canvas.height = image.width; } else { canvas.width = image.width; canvas.height = image.height; }
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                ctx.rotate(degrees * Math.PI / 180);
+                ctx.drawImage(image, -image.width / 2, -image.height / 2);
+                const newDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                document.getElementById('calendarBase64Input').value = newDataUrl;
+                img.src = newDataUrl;
+            };
+            image.src = img.src;
+        }
+
+        function repairInconsistentData() { alert("Função de reparo em desenvolvimento."); }
+        function exportPaidOrdersToCSV() { const paid = globalOrdersCache.filter(o => o.status === 'Pago' || o.status === 'paid'); if(paid.length === 0) return alert("Sem pedidos pagos para exportar."); const csv = Papa.unparse(paid); const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'}); const link = document.createElement("a"); const url = URL.createObjectURL(blob); link.setAttribute("href", url); link.setAttribute("download", "pedidos_pagos.csv"); link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link); }
+
+        function initApp() { hideAuthModal(); const app = document.getElementById('appContainer'); if(app) app.classList.remove('hidden'); if(document.getElementById('userDisplay')) document.getElementById('userDisplay').innerText = currentUser?.email || '...'; addMaterialRow(); if(typeof loadGlobalMockupConfig === 'function') loadGlobalMockupConfig(); if(typeof loadOrderFeeConfig === 'function') loadOrderFeeConfig(); loadMaterialsLibrary(); switchModule('dashboard'); }
+        function switchModule(m) { ['dashboard', 'pricing', 'calendar', 'settings'].forEach(x => { const el = document.getElementById(`module-${x}`); if(el) el.classList.add('hidden'); }); const target = document.getElementById(`module-${m}`); if(target) target.classList.remove('hidden'); document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active')); const nav = document.getElementById(`nav-${m}`); if(nav) nav.classList.add('active'); if (m === 'dashboard') loadDashboardData(); if (m === 'calendar') { if(typeof loadGlobalMockupConfig === 'function') loadGlobalMockupConfig(); loadCalendarOrders(); } if (m === 'pricing') { loadMaterialsLibrary(); } if (m === 'settings') { if(typeof loadOrderFeeConfig === 'function') loadOrderFeeConfig(true); } if (window.innerWidth < 768) { const sidebar = document.getElementById('sidebar'); const overlay = document.getElementById('mobileMenuOverlay'); if(sidebar && !sidebar.classList.contains('-translate-x-full')) { sidebar.classList.add('-translate-x-full'); if(overlay) overlay.classList.add('hidden'); } } }
+        function toggleMobileMenu() { const sidebar = document.getElementById('sidebar'); const overlay = document.getElementById('mobileMenuOverlay'); if (!sidebar || !overlay) return; const isOpen = !sidebar.classList.contains('-translate-x-full'); if (isOpen) { sidebar.classList.add('-translate-x-full'); overlay.classList.add('hidden'); } else { sidebar.classList.remove('-translate-x-full'); overlay.classList.remove('hidden'); } }
+
+        async function loadCalendarOrders() { 
+            if (!currentUser || isOfflineMode) { calendarOrdersCache = []; renderCalendarGrid(); return; }
+            try {
+                const { data, error } = await supabaseClient.from('calendar_orders').select('*').eq('user_id', currentUser.id).order('created_at', { ascending: false }); 
+                if (error) throw error;
+                calendarOrdersCache = (data || []).map(c => ({ ...c, printed: (c.printed === true || c.printed === 'true') })); 
+            } catch (e) {
+                console.warn("Offline: Calendar load failed", e);
+                calendarOrdersCache = [];
+            }
+            renderCalendarGrid(); 
+        }
+        function setCalendarFilter(done) { calendarFilterPrinted = done; renderCalendarGrid(); const tabTodo = document.getElementById('tab-calendar-todo'); const tabDone = document.getElementById('tab-calendar-done'); if(tabTodo) tabTodo.className = !done ? "px-6 py-3 font-bold border-b-2 border-pink-600 text-pink-600 active-cal-tab" : "px-6 py-3 font-bold text-gray-600 hover:text-pink-600 transition"; if(tabDone) tabDone.className = done ? "px-6 py-3 font-bold border-b-2 border-green-600 text-green-600" : "px-6 py-3 font-bold text-gray-600 hover:text-green-600 transition"; }
+        function renderCalendarGrid() { const grid = document.getElementById('calendarGrid'); if(!grid) return; const filtered = calendarOrdersCache.filter(c => c.printed === calendarFilterPrinted); if (!filtered.length) { grid.innerHTML = `<div class="col-span-full text-center py-12 text-gray-400"><i class="fas fa-folder-open text-3xl mb-2 opacity-30"></i><p>Nenhum calendário encontrado.</p></div>`; return; } grid.innerHTML = filtered.map(cal => ` <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col group hover:shadow-md transition"> <div class="px-4 py-3 border-b bg-gray-50 flex justify-between items-center"> <span class="font-bold text-xs text-gray-600">ID: #${cal.order_id}</span> <span class="text-[10px] text-gray-400">${new Date(cal.created_at).toLocaleDateString()}</span> </div> <div class="relative bg-gray-100 h-48 overflow-hidden group"> <img src="${cal.image_data}" class="w-full h-full object-contain p-2"> </div> <div class="p-3 gap-2 flex flex-col"> <button onclick="togglePrintStatus('${cal.id}', ${!cal.printed})" class="w-full py-2 rounded-lg text-xs font-bold transition ${cal.printed ? 'bg-orange-50 text-orange-700 hover:bg-orange-100' : 'bg-green-50 text-green-700 hover:bg-green-100'}"> <i class="fas ${cal.printed ? 'fa-undo' : 'fa-check'} mr-1"></i> ${cal.printed ? 'Voltar para A Fazer' : 'Marcar Impresso'} </button> <div class="grid grid-cols-2 gap-2"> <button onclick="generateCalendarSheetPDF('${cal.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1">PDF 30x</button> <button onclick="generateCalendarMockup('${cal.id}')" class="bg-gray-900 hover:bg-gray-800 text-white py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1">Mockup</button> </div> <button onclick="deleteCalendar('${cal.id}')" class="text-red-400 hover:text-red-600 text-[10px] font-bold mt-1 transition">Excluir Arte</button> </div> </div>`).join(''); }
+        async function togglePrintStatus(id, s) { if(isOfflineMode) return alert("Modo Offline: Ação não disponível"); const { error } = await supabaseClient.from('calendar_orders').update({ printed: s }).eq('id', id); if (!error) loadCalendarOrders(); }
+        async function deleteCalendar(id) { if(isOfflineMode) return alert("Modo Offline: Ação não disponível"); if(confirm("Excluir?")) { await supabaseClient.from('calendar_orders').delete().eq('id', id); loadCalendarOrders(); } }
+        function openNewCalendarModal() { document.getElementById('newCalendarModal').classList.remove('hidden'); }
+        function openMaterialsModal() { document.getElementById('materialsModal').classList.remove('hidden'); loadMaterialsLibrary(); }
+        function openProductsModal() { document.getElementById('productsModal').classList.remove('hidden'); loadProducts(); }
+        function importData(f) { Papa.parse(f, { header: true, complete: async (r) => { if(isOfflineMode) return alert("Modo Offline"); const batch = r.data.map(d => ({ user_id: currentUser.id, platform_order_id: d['ID do Pedido'] || Math.random().toString(36), orderValue: normalizeCurrency(d['Valor Total']), status: 'pending', shippingDate: new Date().toISOString() })); await supabaseClient.from('orders').upsert(batch); loadDashboardData(); } }); }
+        function saveManualOrder() { if(isOfflineMode) return alert("Modo Offline"); const payload = { user_id: currentUser.id, platform_order_id: document.getElementById('newOrderId').value, orderValue: normalizeCurrency(document.getElementById('newOrderValue').value), status: 'pending', shippingDate: document.getElementById('newOrderDate').value }; supabaseClient.from('orders').insert([payload]).then(() => { document.getElementById('importModal').classList.add('hidden'); loadDashboardData(); }); }
+        
+        async function loadDashboardData() { 
+            if (!currentUser || isOfflineMode) { globalOrdersCache = []; applyFilters(); return; }
+            try {
+                const { data, error } = await supabaseClient.from('orders').select('*').eq('user_id', currentUser.id).order('shippingDate', { ascending: false }); 
+                if (error) {
+                    if (isInvalidRefreshTokenError(error)) { resetSessionAndReload(); return; } 
+                    throw error;
+                }
+                globalOrdersCache = data || []; 
+            } catch(e) {
+                console.warn("Offline: Dashboard load failed", e);
+                globalOrdersCache = [];
+            }
+            applyFilters(); 
+        }
+
+        function applyFilters() { const m = document.getElementById('filterMonth').value; let list = globalOrdersCache; let sold=0, toRec=0, paid=0, prof=0; globalOrdersCache.forEach(o => { const isPaid = o.status==='Pago'||o.status==='paid'; const v = normalizeCurrency(o.orderValue), r = normalizeCurrency(o.actualPaidAmount), c = normalizeCurrency(o.cost_of_goods_sold); const exp = (v*0.8)-4; if(m && o.shippingDate && o.shippingDate.startsWith(m)) { if(!isPaid) toRec += (exp>0?exp:0); } else if(!m && !isPaid) toRec += (exp>0?exp:0); if(m) { const d=isPaid?o.paymentDate:o.shippingDate; if(!d || !d.startsWith(m)) return; } sold+=v; if(isPaid){ paid+=r; prof+=(r-c); } }); document.getElementById('kpiTotalSold').innerText = fmt(sold); document.getElementById('kpiToReceive').innerText = fmt(toRec); document.getElementById('kpiPaid').innerText = fmt(paid); document.getElementById('kpiProfit').innerText = fmt(prof); if(currentStatusFilter!=='all') list = list.filter(o => { const p=o.status==='Pago'||o.status==='paid'; return currentStatusFilter==='paid'?p:!p; }); if(m) list = list.filter(o => { const d=(o.status==='Pago'||o.status==='paid')?o.paymentDate:o.shippingDate; return d && d.startsWith(m); }); const tbody = document.getElementById('ordersTableBody'); if(!list.length) { tbody.innerHTML='<tr><td colspan="8" class="text-center py-8 text-gray-400">Nenhum pedido encontrado.</td></tr>'; return; } let visTotal=0; tbody.innerHTML = list.map(o => { const isPaid = o.status==='Pago'||o.status==='paid'; visTotal += isPaid?normalizeCurrency(o.actualPaidAmount):0; return `<tr class="border-b hover:bg-gray-50"><td class="px-6 py-3">${o.shippingDate?new Date(o.shippingDate).toLocaleDateString():'-'}</td><td class="px-6 py-3 font-mono text-xs">${o.platform_order_id}</td><td class="px-6 py-3">${fmt(o.orderValue)}</td><td class="px-6 py-3">${fmt((o.orderValue*0.8)-4)}</td><td class="px-6 py-3 font-bold text-green-700">${isPaid?fmt(o.actualPaidAmount):'-'}</td><td class="px-6 py-3"><span class="px-2 py-1 rounded text-xs font-bold ${isPaid?'bg-green-100 text-green-800':'bg-yellow-100 text-yellow-800'}">${isPaid?'Pago':'Pendente'}</span></td><td class="px-6 py-3 text-right"><button onclick="deleteOrder('${o.platform_order_id}')" class="text-red-500 hover:bg-red-50 p-2 rounded transition"><i class="fas fa-trash"></i></button></td></tr>`; }).join(''); document.getElementById('visibleTotalDisplay').innerText = fmt(visTotal); }
+        async function deleteOrder(id){ if(isOfflineMode) return alert("Modo Offline"); if(confirm("Excluir este pedido?")) { await supabaseClient.from('orders').delete().eq('platform_order_id', id); loadDashboardData(); } }
+        function setFilter(f) { currentStatusFilter=f; ['all','pending','paid'].forEach(x => { const b = document.getElementById('btn-filter-'+x); if(b) b.className = x===f ? "filter-btn active px-4 py-1.5 text-sm font-medium rounded-md transition-colors text-gray-600 hover:bg-gray-100" : "filter-btn px-4 py-1.5 text-sm font-medium rounded-md transition-colors text-gray-600 hover:bg-gray-100"; }); loadDashboardData(); }
+        
+        async function loadOrderFeeConfig(forceRefresh) { 
+            if (!currentUser || isOfflineMode) {
+                 orderFeeConfig = { default: { percent: 20, fixed: 4 }, overrides: [] };
+                 return updateFeeUI();
+            }
+            try {
+                const { data, error } = await supabaseClient.from('app_settings').select('*').eq('id', ORDER_FEE_SETTINGS_ID).maybeSingle(); 
+                if (error) throw error;
+                if (data?.config_data) orderFeeConfig = data.config_data;
+                else orderFeeConfig = { default: { percent: 20, fixed: 4 }, overrides: [] };
+            } catch(e) {
+                console.warn("Offline: Fees load failed", e);
+                orderFeeConfig = { default: { percent: 20, fixed: 4 }, overrides: [] };
+            }
+            updateFeeUI();
+        }
+
+        function updateFeeUI() {
+            document.getElementById('feeDefaultPercent').value = orderFeeConfig.default?.percent || 0; 
+            document.getElementById('feeDefaultFixed').value = orderFeeConfig.default?.fixed || 0; 
+            const list = document.getElementById('feeOverridesList'); list.innerHTML = ''; 
+            if (Array.isArray(orderFeeConfig.overrides)) { orderFeeConfig.overrides.forEach(o => addFeeOverrideRow(o)); }
+        }
+
+        async function saveOrderFeeConfig() { 
+            if (!currentUser || isOfflineMode) return alert("Modo Offline: Não é possível salvar configurações.");
+            const defPct = parseFloat(document.getElementById('feeDefaultPercent').value) || 0; const defFix = parseFloat(document.getElementById('feeDefaultFixed').value) || 0; const overrides = []; document.querySelectorAll('.fee-override-row').forEach(row => { const name = row.querySelector('.mkt-name').value; const pct = parseFloat(row.querySelector('.mkt-pct').value) || 0; const fix = parseFloat(row.querySelector('.mkt-fixed').value) || 0; if(name) { overrides.push({ id: name.toLowerCase().replace(/\s+/g,'_'), name, percent: pct, fixed: fix }); } }); const newConfig = { default: { percent: defPct, fixed: defFix }, overrides: overrides }; const status = document.getElementById('feeConfigStatus'); status.innerText = "Salvando..."; const { error } = await supabaseClient.from('app_settings').upsert({ id: ORDER_FEE_SETTINGS_ID, config_data: newConfig }); if (error) { console.error(error); status.innerText = "Erro ao salvar."; status.className = "text-xs text-red-500"; } else { orderFeeConfig = newConfig; status.innerText = "Configurações salvas com sucesso!"; status.className = "text-xs text-green-600"; setTimeout(() => status.innerText = "", 3000); } 
+        }
+        function addFeeOverrideRow(data = null) { const list = document.getElementById('feeOverridesList'); const div = document.createElement('div'); div.className = "fee-override-row flex gap-2 items-center mb-2 animate-[fadeIn_0.3s]"; const nameVal = data ? data.name : ''; const pctVal = data ? data.percent : ''; const fixVal = data ? data.fixed : ''; div.innerHTML = ` <input type="text" placeholder="Nome (ex: Shopee)" class="flex-1 p-2 border rounded mkt-name text-sm" value="${nameVal}"> <input type="number" step="0.01" placeholder="%" class="w-20 p-2 border rounded mkt-pct text-sm" value="${pctVal}"> <input type="number" step="0.01" placeholder="R$ Fix" class="w-24 p-2 border rounded mkt-fixed text-sm" value="${fixVal}"> <button onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded transition"><i class="fas fa-trash"></i></button> `; list.appendChild(div); }
+        function getLocal(key) { return JSON.parse(localStorage.getItem(key) || '[]'); }
+        function setLocal(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
+        function calcMaterialUnitCost() { const price = parseFloat(document.getElementById('newLibMaterialTotalPrice').value) || 0; const qty = parseFloat(document.getElementById('newLibMaterialQty').value) || 0; const display = document.getElementById('finalUnitCostDisplay'); if (qty > 0 && price > 0) { const unit = price / qty; display.innerText = `Unit: ${fmt(unit)}`; display.classList.remove('hidden'); return unit; } else { display.classList.add('hidden'); return 0; } }
+        
+        async function saveMaterialToLibrary() { 
+            if(isOfflineMode) return alert("Modo Offline"); 
+            const name = document.getElementById('newLibMaterialName').value; 
+            const unit = document.getElementById('newLibMaterialUnit').value; 
+            const date = document.getElementById('newLibMaterialDate').value || new Date().toISOString(); 
+            const purchasePrice = parseFloat(document.getElementById('newLibMaterialTotalPrice').value) || 0; 
+            const purchaseQty = parseFloat(document.getElementById('newLibMaterialQty').value) || 0; 
+            
+            if (!name) return alert("Preencha o nome do material."); 
+            if (purchasePrice <= 0 || purchaseQty <= 0) return alert("Preencha valor total e quantidade corretamente."); 
+            
+            const unitCost = purchasePrice / purchaseQty; 
+            const timestamp = new Date().toISOString(); 
+            const materialData = { user_id: currentUser.id, name: name, unit_cost: unitCost, unit_of_measure: unit }; 
+            let history = []; 
+            
+            // Variável para controlar se houve mudança significativa de preço para disparar o sync
+            let shouldSyncProducts = false;
+            let oldUnitCost = 0;
+
+            if (editingMaterialId) { 
+                const currentItem = currentMaterialsList.find(m => String(m.id) === String(editingMaterialId)); 
+                oldUnitCost = currentItem.unit_cost || 0;
+                try { if (currentItem.purchase_info_json) { const parsed = typeof currentItem.purchase_info_json === 'string' ? JSON.parse(currentItem.purchase_info_json) : currentItem.purchase_info_json; if(parsed.history) history = parsed.history; } } catch(e) {} 
+                
+                if (Math.abs(oldUnitCost - unitCost) > 0.001) { 
+                    history.unshift({ date: date, old_cost: oldUnitCost, new_cost: unitCost, purchase_price: purchasePrice, purchase_qty: purchaseQty, unit: unit }); 
+                    shouldSyncProducts = true;
+                } 
+                
+                materialData.purchase_info_json = JSON.stringify({ last_purchase_price: purchasePrice, last_purchase_qty: purchaseQty, last_updated: timestamp, history: history }); 
+                const { error } = await supabaseClient.from('pricing_materials').update(materialData).eq('id', editingMaterialId); 
+                if (error) { console.warn("Erro ao atualizar material:", error); alert("Erro ao salvar. Verifique conexão."); } 
+                else { 
+                    if(shouldSyncProducts) {
+                        await syncMaterialCostToProducts(name, unitCost, oldUnitCost);
+                    } else {
+                        alert("Material atualizado!");
+                    }
+                } 
+            } else { 
+                history = [{ date: date, old_cost: 0, new_cost: unitCost, purchase_price: purchasePrice, purchase_qty: purchaseQty, note: "Cadastro inicial" }]; 
+                materialData.purchase_info_json = JSON.stringify({ last_purchase_price: purchasePrice, last_purchase_qty: purchaseQty, last_updated: timestamp, history: history }); 
+                const { error } = await supabaseClient.from('pricing_materials').insert([materialData]); 
+                if (error) console.warn(error); 
+                else alert("Material criado!");
+            } 
+            cancelEditMaterial(); loadMaterialsLibrary(); 
+        }
+
+        async function syncMaterialCostToProducts(materialName, newUnitCost, oldUnitCost) {
+            updateProgress(10, `Atualizando produtos que usam ${materialName}...`);
+            try {
+                // 1. Buscar todos os produtos do usuário
+                const { data: products, error } = await supabaseClient.from('pricing_products').select('*').eq('user_id', currentUser.id);
+                if (error || !products) throw new Error("Falha ao buscar produtos");
+
+                let updatedCount = 0;
+                
+                // 2. Iterar e verificar quais usam o material
+                for (let i = 0; i < products.length; i++) {
+                    const p = products[i];
+                    let needsUpdate = false;
+                    let json = {};
+                    
+                    try { json = typeof p.materials_json === 'string' ? JSON.parse(p.materials_json) : p.materials_json; } catch(e) { continue; }
+                    if (!json.materials) continue;
+
+                    let matList = json.materials;
+                    let oldTotalMatCost = 0;
+                    let newTotalMatCost = 0;
+
+                    // Calcular custo anterior e novo
+                    matList.forEach(m => {
+                        oldTotalMatCost += (m.cost || 0);
+                        if (m.name.trim().toLowerCase() === materialName.trim().toLowerCase()) {
+                            m.unit_cost = newUnitCost;
+                            m.cost = m.qty * newUnitCost;
+                            needsUpdate = true;
+                        }
+                        newTotalMatCost += m.cost;
+                    });
+
+                    if (needsUpdate) {
+                        const costDiff = newTotalMatCost - oldTotalMatCost;
+                        const newBaseCost = (p.base_cost || 0) + costDiff;
+                        
+                        // Atualizar JSON
+                        json.materials = matList;
+                        
+                        // Adicionar Histórico no Produto
+                        if (!json.history) json.history = [];
+                        json.history.unshift({
+                            date: new Date().toISOString(),
+                            type: 'auto_material_update',
+                            msg: `Material "${materialName}" atualizado`,
+                            details: `De ${fmt(oldUnitCost)} para ${fmt(newUnitCost)}`,
+                            cost_impact: costDiff
+                        });
+
+                        // 3. Salvar no Supabase
+                        await supabaseClient.from('pricing_products').update({
+                            base_cost: newBaseCost,
+                            materials_json: JSON.stringify(json)
+                        }).eq('id', p.id);
+                        
+                        updatedCount++;
+                    }
+                    updateProgress(10 + Math.floor((i / products.length) * 80), `Processando ${i+1}/${products.length}...`);
+                }
+                
+                document.getElementById('progressModal').classList.add('hidden');
+                alert(`Preço atualizado! ${updatedCount} produto(s) foram recalculados automaticamente.`);
+            } catch (e) {
+                console.error(e);
+                document.getElementById('progressModal').classList.add('hidden');
+                alert("Erro ao sincronizar produtos: " + e.message);
+            }
+        }
+
+        function startEditMaterial(id) { const m = currentMaterialsList.find(item => String(item.id) === String(id)); if (!m) return; editingMaterialId = id; document.getElementById('newLibMaterialName').value = m.name; document.getElementById('newLibMaterialUnit').value = m.unit_of_measure || 'un'; let purchaseData = { purchase_qty: 1, purchase_price: m.unit_cost }; try { if (m.purchase_info_json) { const parsed = typeof m.purchase_info_json === 'string' ? JSON.parse(m.purchase_info_json) : m.purchase_info_json; if(parsed.last_purchase_qty) { purchaseData.purchase_qty = parsed.last_purchase_qty; purchaseData.purchase_price = parsed.last_purchase_price; } } } catch(e) {} if(!purchaseData.purchase_price && m.unit_cost) { purchaseData.purchase_price = m.unit_cost; purchaseData.purchase_qty = 1; } document.getElementById('newLibMaterialQty').value = purchaseData.purchase_qty; document.getElementById('newLibMaterialTotalPrice').value = purchaseData.purchase_price; document.getElementById('newLibMaterialDate').value = new Date().toISOString().split('T')[0]; calcMaterialUnitCost(); document.getElementById('materialFormTitle').innerText = `Editando: ${m.name}`; document.getElementById('btnSaveMaterial').innerText = "Salvar Alterações"; document.getElementById('btnSaveMaterial').className = "bg-green-600 text-white px-6 py-2 rounded text-sm font-bold hover:bg-green-700 w-full md:w-auto transition"; document.getElementById('btnCancelEditMaterial').classList.remove('hidden'); renderMaterialHistory(m); }
+        function renderMaterialHistory(material) { const container = document.getElementById('historyTimelineContainer'); const section = document.getElementById('materialHistorySection'); container.innerHTML = ''; let history = []; try { if (material.purchase_info_json) { const parsed = typeof material.purchase_info_json === 'string' ? JSON.parse(material.purchase_info_json) : material.purchase_info_json; if(parsed.history) history = parsed.history; } } catch(e) {} if (!history || !history.length) { section.classList.add('hidden'); return; } section.classList.remove('hidden'); history.slice(0, 5).forEach((h, index) => { const diff = h.new_cost - h.old_cost; const isCheaper = diff < 0; const isInitial = h.old_cost === 0; const icon = isInitial ? 'fa-star' : (isCheaper ? 'fa-arrow-down' : 'fa-arrow-up'); const colorClass = isInitial ? 'text-blue-500 bg-blue-100' : (isCheaper ? 'text-green-600 bg-green-100' : 'text-red-500 bg-red-100'); const badgeText = isInitial ? 'Cadastro' : (isCheaper ? 'Positivo (Barateou)' : 'Negativo (Encareceu)'); const badgeColor = isInitial ? 'bg-blue-100 text-blue-700' : (isCheaper ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'); container.innerHTML += ` <div class="relative"> <div class="absolute -left-[35px] top-1 ${colorClass} w-6 h-6 rounded-full flex items-center justify-center border-2 border-white shadow-sm"> <i class="fas ${icon} text-[10px]"></i> </div> <div class="flex justify-between items-start"> <div> <p class="text-[10px] text-gray-400 font-bold uppercase mb-0.5">${new Date(h.date).toLocaleDateString()}</p> <p class="text-xs text-gray-700 font-medium">Novo Custo: ${fmt(h.new_cost)} / ${h.unit || 'un'}</p> ${!isInitial ? `<p class="text-[10px] text-gray-400">Anterior: ${fmt(h.old_cost)}</p>` : ''} </div> <span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${badgeColor}">${badgeText}</span> </div> </div>`; }); }
+        function cancelEditMaterial() { editingMaterialId = null; document.getElementById('newLibMaterialName').value = ''; document.getElementById('newLibMaterialQty').value = ''; document.getElementById('newLibMaterialTotalPrice').value = ''; document.getElementById('newLibMaterialDate').value = ''; document.getElementById('finalUnitCostDisplay').classList.add('hidden'); document.getElementById('materialFormTitle').innerText = "Registrar Nova Compra"; document.getElementById('btnSaveMaterial').innerText = "Adicionar ao Estoque"; document.getElementById('btnSaveMaterial').className = "bg-indigo-600 text-white px-6 py-2 rounded text-sm font-bold hover:bg-indigo-700 w-full md:w-auto transition"; document.getElementById('btnCancelEditMaterial').classList.add('hidden'); document.getElementById('materialHistorySection').classList.add('hidden'); }
+        async function loadMaterialsLibrary() { 
+            let items = []; 
+            if(isOfflineMode) { items = getLocal('demo_materials'); } 
+            else {
+                try {
+                    let { data, error } = await supabaseClient.from('pricing_materials').select('*').eq('user_id', currentUser.id); 
+                    if ((!data || data.length === 0) && !error) { const res = await supabaseClient.from('pricing_materials').select('*'); if (res.data && res.data.length > 0) data = res.data; } 
+                    if (error) throw error;
+                    items = data; 
+                } catch(e) {
+                    console.warn("Offline: Material library load failed", e);
+                    items = getLocal('demo_materials');
+                }
+            }
+            
+            currentMaterialsList = items; 
+            const tbody = document.getElementById('materialsLibraryList'); 
+            if(tbody) { 
+                if(items.length === 0) { tbody.innerHTML = '<tr><td colspan="3" class="p-4 text-center text-gray-400">Nenhum material cadastrado.</td></tr>'; } 
+                else { tbody.innerHTML = items.map(m => { const val = m.unit_cost || m.cost_per_unit || 0; return ` <tr class="hover:bg-gray-50 group border-b border-gray-50 last:border-0"> <td class="py-3 px-2 text-gray-700 font-medium">${m.name} <span class="text-xs text-gray-400 font-normal">(${m.unit_of_measure||'un'})</span></td> <td class="py-3 px-2 text-indigo-600 font-bold">${fmt(val)}</td> <td class="py-3 px-2 text-right"> <button onclick="startEditMaterial('${m.id}')" class="text-blue-500 hover:text-blue-700 bg-blue-50 p-2 rounded-lg mr-1 transition"><i class="fas fa-pencil-alt"></i></button> <button onclick="deleteMaterial('${m.id}')" class="text-red-400 hover:text-red-600 bg-red-50 p-2 rounded-lg transition"><i class="fas fa-trash"></i></button> </td> </tr> `}).join(''); } 
+            } 
+            const dl = document.getElementById('materialsDatalist'); if(dl) dl.innerHTML = items.map(m => { const val = m.unit_cost || m.cost_per_unit || 0; return `<option value="${m.name}" data-cost="${val}">`; }).join(''); renderMaterialsQuickPick(items); 
+        }
+        function renderMaterialsQuickPick(items) { const container = document.getElementById('materialsQuickPick'); if(!container) return; if(items.length === 0) { container.innerHTML = '<p class="text-xs text-gray-400 italic">Nenhum material na biblioteca.</p>'; return; } container.innerHTML = items.map(m => { const val = m.unit_cost || m.cost_per_unit || 0; return ` <button onclick="addMaterialRow('${m.name}', 1, '${val}', '${val}')" class="text-xs border border-indigo-200 bg-white text-indigo-700 px-3 py-1.5 rounded-full hover:bg-indigo-50 hover:border-indigo-300 transition shadow-sm font-medium flex items-center gap-1"> <i class="fas fa-plus-circle text-indigo-400"></i> ${m.name} <span class="text-gray-400 font-normal">(${fmt(val)})</span> </button> `}).join(''); }
+        async function deleteMaterial(id) { if(isOfflineMode) return alert("Modo Offline"); if(!confirm("Remover material?")) return; const { error } = await supabaseClient.from('pricing_materials').delete().eq('id', id); if (error) { const list = getLocal('demo_materials'); const filtered = list.filter(m => String(m.id) !== String(id)); setLocal('demo_materials', filtered); } loadMaterialsLibrary(); }
+        async function generateCalendarSheetPDF(id) { const cal = calendarOrdersCache.find(c => String(c.id) === String(id)); if (!cal) return alert("Erro: Calendário não encontrado."); updateProgress(10, "Carregando imagem..."); try { const img = await loadImageFromDataUrl(cal.image_data); const doc = new jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' }); const pageWidth = 297; const pageHeight = 210; const marginLeft = 0; const marginTop = 0; const cols = 6; const rows = 5; const itemsPerPage = cols * rows; const itemWidth = 49.5; const itemHeight = 42.0; updateProgress(50, "Gerando PDF..."); for (let i = 0; i < itemsPerPage; i++) { const col = i % cols; const row = Math.floor(i / cols); const x = marginLeft + (col * itemWidth); const y = marginTop + (row * itemHeight); doc.addImage(img, 'JPEG', x, y, itemWidth, itemHeight); } updateProgress(100, "Finalizando..."); doc.save(`calendarios_30x_${cal.order_id || 'pedido'}.pdf`); document.getElementById('progressModal').classList.add('hidden'); } catch (e) { console.error(e); alert("Erro ao gerar PDF: " + e.message); document.getElementById('progressModal').classList.add('hidden'); } }
+
+        async function saveCalendarOrder() {
+            if (!currentUser) return alert("Você precisa estar logado.");
+            if(isOfflineMode) return alert("Modo Offline: Não é possível salvar na nuvem.");
+            const oid = document.getElementById('calendarOrderIdInput').value; 
+            const img = document.getElementById('calendarBase64Input').value; 
+            if(!oid || !img) return alert("Por favor, preencha o ID do pedido e envie uma imagem."); 
+            
+            try {
+                const { error } = await supabaseClient.from('calendar_orders').insert([{
+                    user_id: currentUser.id, 
+                    order_id: oid, 
+                    image_data: img, 
+                    printed: false
+                }]);
+                
+                if (error) {
+                     if (error.code === '42P01') throw new Error("A tabela 'calendar_orders' não existe. Por favor, execute o SQL de criação no Supabase.");
+                     throw error;
+                }
+
+                document.getElementById('calendarOrderIdInput').value = ''; 
+                document.getElementById('calendarBase64Input').value = '';
+                const prev = document.getElementById('calendarPreviewImage');
+                if(prev) {
+                    prev.src = '';
+                    prev.classList.add('hidden'); 
+                }
+                const ph = document.getElementById('calendarUploadPlaceholder');
+                if(ph) ph.classList.remove('hidden');
+                
+                document.getElementById('newCalendarModal').classList.add('hidden'); 
+                loadCalendarOrders();
+                alert("Calendário salvo com sucesso!");
+            } catch(e) {
+                console.warn("Erro ao salvar calendário:", e);
+                alert("Erro ao salvar: " + (e.message || "Erro desconhecido"));
+            }
+        }
+
+        async function loadGlobalMockupConfig() { 
+            if (!supabaseClient || isOfflineMode) return;
+            try {
+                const { data, error } = await supabaseClient.from('app_settings').select('*').eq('id', MOCKUP_SETTINGS_ID).maybeSingle(); 
+                if(error) throw error;
+                if (data?.config_data) {
+                    mockupConfig = data.config_data; 
+                } else {
+                    mockupConfig = getDefaultMockupConfigData();
+                }
+            } catch(e) {
+                console.warn("Offline: Mockup config load failed", e);
+                mockupConfig = getDefaultMockupConfigData();
+            }
+        }
+
+        async function saveGlobalMockupConfig() {
+            if(isOfflineMode) return alert("Modo Offline");
+            const tmpl = document.getElementById('mockupTemplateBase64Input').value; 
+            let coords = {}; 
+            try { coords = JSON.parse(document.getElementById('mockupConfigJsonTextarea').value); } 
+            catch(e) { return alert("JSON de coordenadas inválido"); }
+            
+            const newConf = { template_data_url: tmpl, coords: coords }; 
+            
+            try {
+                const { error } = await supabaseClient.from('app_settings').upsert({ id: MOCKUP_SETTINGS_ID, config_data: newConf }); 
+                 if (error) {
+                     if (error.code === '42P01') throw new Error("A tabela 'app_settings' não existe. Por favor, execute o SQL de criação no Supabase.");
+                     throw error;
+                }
+                mockupConfig = newConf; 
+                alert("Configuração do Mockup salva com sucesso!"); 
+                toggleMockupConfigPanel(false);
+            } catch(e) {
+                console.warn(e);
+                alert("Erro ao salvar configuração: " + e.message);
+            }
+        }
+        
+        async function loadMockupConfigUI() {
+            if(!mockupConfig) { 
+                await loadGlobalMockupConfig(); 
+                if(!mockupConfig) mockupConfig = getDefaultMockupConfigData(); 
+            }
+            document.getElementById('mockupTemplateFileName').innerText = "Template Atual carregado"; const tmplImg = document.getElementById('mockupTemplatePreviewImage'); const tmplUrl = mockupConfig.template_data_url || MOCKUP_FALLBACK_TEMPLATE_DATA_URL; if(tmplImg) tmplImg.src = tmplUrl;
+            document.getElementById('mockupTemplatePreviewContainer').classList.remove('hidden'); document.getElementById('mockupTemplateBase64Input').value = tmplUrl; document.getElementById('mockupConfigJsonTextarea').value = JSON.stringify(mockupConfig.coords || {}, null, 2);
+        }
+
+        function toggleMockupConfigPanel(show) { 
+            const p=document.getElementById('mockupConfigPanel'); const b=document.getElementById('mockupConfigButtonWrap'); 
+            if(show === false || (p && !p.classList.contains('hidden'))) { p.classList.add('hidden'); b.classList.remove('hidden'); } else { p.classList.remove('hidden'); b.classList.add('hidden'); loadMockupConfigUI(); } 
+        }
+
+        async function generateCalendarMockup(id) { 
+            const cal = calendarOrdersCache.find(c => String(c.id) === String(id)); 
+            if (!cal) return alert("Erro: Calendário não encontrado."); 
+            
+            updateProgress(10, "Carregando configurações..."); 
+            
+            // Garantir config
+            if (!mockupConfig) { 
+                await loadGlobalMockupConfig(); 
+                if (!mockupConfig) mockupConfig = getDefaultMockupConfigData(); 
+            } 
+            
+            try { 
+                const templateDataUrl = mockupConfig.template_data_url || MOCKUP_FALLBACK_TEMPLATE_DATA_URL; 
+                const templateImg = await loadImageFromDataUrl(templateDataUrl); 
+                const artImg = await loadImageFromDataUrl(cal.image_data); 
+                
+                const canvas = document.createElement('canvas'); 
+                canvas.width = templateImg.width; 
+                canvas.height = templateImg.height; 
+                const ctx = canvas.getContext('2d'); 
+                
+                // Desenhar template
+                ctx.drawImage(templateImg, 0, 0); 
+                updateProgress(40, "Aplicando arte..."); 
+                
+                const normalizeQuad = (q, w, h) => { 
+                    if (!q) return null;
+                    // Se as coordenadas forem normalizadas (0 a 1), converte. Se já forem absolutas (>2), mantém.
+                    const isNorm = (q.tl.x <= 2 && q.br.x <= 2); 
+                    if(isNorm) return { tl: { x: q.tl.x * w, y: q.tl.y * h }, tr: { x: q.tr.x * w, y: q.tr.y * h }, br: { x: q.br.x * w, y: q.br.y * h }, bl: { x: q.bl.x * w, y: q.bl.y * h } }; 
+                    return q; 
+                }; 
+                
+                const leftQ = mockupConfig.coords?.leftQuad ? normalizeQuad(mockupConfig.coords.leftQuad, canvas.width, canvas.height) : null; 
+                const rightQ = mockupConfig.coords?.rightQuad ? normalizeQuad(mockupConfig.coords.rightQuad, canvas.width, canvas.height) : null; 
+                
+                const drawWarped = (img, quad) => { 
+                    if(!quad) return;
+                    const p1 = quad.tl; const p2 = quad.tr; const p3 = quad.br; const p4 = quad.bl; 
+                    drawTextureTriangle(ctx, img, 0, 0, img.width, 0, img.width, img.height, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y); 
+                    drawTextureTriangle(ctx, img, 0, 0, 0, img.height, img.width, img.height, p1.x, p1.y, p4.x, p4.y, p3.x, p3.y); 
+                }; 
+                
+                // Usar fallback se nenhum quad definido
+                if (!leftQ && !rightQ) {
+                     console.warn("Nenhum quad definido. Usando default.");
+                     const defL = normalizeQuad(MOCKUP_DEFAULT_LEFT_QUAD, canvas.width, canvas.height);
+                     const defR = normalizeQuad(MOCKUP_DEFAULT_RIGHT_QUAD, canvas.width, canvas.height);
+                     drawWarped(artImg, defL);
+                     drawWarped(artImg, defR);
+                } else {
+                    if (leftQ) drawWarped(artImg, leftQ); 
+                    if (rightQ) drawWarped(artImg, rightQ); 
+                }
+                
+                updateProgress(90, "Salvando..."); 
+                const link = document.createElement('a'); 
+                link.download = `mockup_${cal.order_id || 'calendario'}.jpg`; 
+                link.href = canvas.toDataURL('image/jpeg', 0.9); 
+                link.click(); 
+                document.getElementById('progressModal').classList.add('hidden'); 
+            } catch(e) { 
+                console.error(e); 
+                alert("Erro ao gerar Mockup: " + e.message); 
+                document.getElementById('progressModal').classList.add('hidden'); 
+            } 
+        }
+
+        function drawTextureTriangle(ctx, im, x0, y0, x1, y1, x2, y2, u0, v0, u1, v1, u2, v2) {
+            ctx.save(); ctx.beginPath();
+            const cx = (u0 + u1 + u2) / 3, cy = (v0 + v1 + v2) / 3, expF = 0.005;
+            const ex0 = u0 + (u0 - cx) * expF, ey0 = v0 + (v0 - cy) * expF, ex1 = u1 + (u1 - cx) * expF, ey1 = v1 + (v1 - cy) * expF, ex2 = u2 + (u2 - cx) * expF, ey2 = v2 + (v2 - cy) * expF;
+            ctx.moveTo(ex0, ey0); ctx.lineTo(ex1, ey1); ctx.lineTo(ex2, ey2); ctx.closePath(); ctx.clip();
+            const det = (x0 * (y1 - y2) - x1 * (y0 - y2) + x2 * (y0 - y1)); if (det === 0) { ctx.restore(); return; }
+            const a = (u0 * (y1 - y2) - u1 * (y0 - y2) + u2 * (y0 - y1)) / det, b = (v0 * (y1 - y2) - v1 * (y0 - y2) + v2 * (y0 - y1)) / det, c = (u0 * (x2 - x1) - u1 * (x2 - x0) + u2 * (x1 - x0)) / det, d = (v0 * (x2 - x1) - v1 * (x2 - x0) + v2 * (x1 - x0)) / det, e = (u0 * (x1 * y2 - x2 * y1) - u1 * (x0 * y2 - x2 * y0) + u2 * (x0 * y1 - x1 * y0)) / det, f = (v0 * (x1 * y2 - x2 * y1) - v1 * (x0 * y2 - x2 * y0) + v2 * (x0 * y1 - x1 * y0)) / det;
+            ctx.transform(a, b, c, d, e, f); ctx.drawImage(im, 0, 0); ctx.restore();
+        }
+
+        function handleCalendarImageUpload(f) {
+            resizeToJpegDataUrl(f, 800).then((b64) => {
+                document.getElementById('calendarBase64Input').value = b64;
+                document.getElementById('calendarPreviewImage').src = b64;
+                document.getElementById('calendarPreviewImage').classList.remove('hidden');
+                document.getElementById('calendarUploadPlaceholder').classList.add('hidden');
+                document.getElementById('calendarRotationControls').classList.remove('hidden');
+                document.getElementById('calendarRotationControls').classList.add('flex');
+                if(f.name) document.getElementById('calendarFileName').innerText = f.name;
+            });
+        }
+
+        // --- PRODUCTS ---
+        async function loadProducts() { 
+            let items = []; 
+            if(isOfflineMode) { items = getLocal('demo_products'); }
+            else {
+                try {
+                    const { data, error } = await supabaseClient.from('pricing_products').select('*').eq('user_id', currentUser.id); 
+                    if (!error && data) items = data; else items = getLocal('demo_products'); 
+                } catch(e) {
+                    console.warn("Offline: Products load failed");
+                    items = getLocal('demo_products');
+                }
+            }
+            currentProductsList = items; 
+            const grid = document.getElementById('productsGrid'); const msg = document.getElementById('noProductsMsg'); 
+            if(items.length === 0) { grid.innerHTML = ''; msg.classList.remove('hidden'); } else { 
+                msg.classList.add('hidden'); 
+                grid.innerHTML = items.map(p => { 
+                    const cost = p.base_cost || 0; 
+                    const price = p.selling_price || 0;
+                    return `<div onclick="viewProduct('${p.id}')" class="bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col hover:shadow-lg transition-all duration-300 relative group overflow-hidden cursor-pointer h-full"> 
+                        <div class="h-32 w-full bg-white relative border-b border-gray-100">
+                             ${p.product_image_data ? `<img src="${p.product_image_data}" class="h-full w-full object-contain p-1">` : '<div class="flex flex-col items-center justify-center h-full text-gray-300"><i class="fas fa-image text-3xl"></i></div>'}
+                             ${price > 0 ? `<div class="absolute top-2 right-2 bg-indigo-600 text-white text-xs font-bold px-2 py-1 rounded shadow-sm">${fmt(price)}</div>` : ''}
+                        </div> 
+                        <div class="p-3 flex flex-col justify-between flex-1">
+                            <div><h4 class="font-bold text-gray-800 text-sm leading-tight mb-1 line-clamp-2">${p.product_name}</h4></div>
+                            <div class="flex justify-between items-end mt-2">
+                                <div class="text-xs text-gray-500">
+                                    <span class="block text-[10px] uppercase">Custo Base</span>
+                                    <span class="font-bold text-gray-700">${fmt(cost)}</span>
+                                </div>
+                                <span class="text-indigo-600 text-xs font-bold hover:bg-indigo-50 px-2 py-1 rounded transition">Ver Detalhes</span>
+                            </div>
+                        </div> 
+                    </div>`; }).join(''); 
+            } 
+        }
+
+        function viewProduct(id) {
+            const p = currentProductsList.find(x => String(x.id) === String(id));
+            if (!p) return;
+
+            document.getElementById('viewProductTitle').innerText = p.product_name;
+            const content = document.getElementById('viewProductContent');
+            const historyContainer = document.getElementById('viewProductHistory');
+            switchProductViewTab('details'); // Reset tab
+
+            // Safe Parse
+            let materials = [];
+            let strategies = [];
+            let history = [];
+            try {
+                if (p.materials_json) {
+                    const json = typeof p.materials_json === 'string' ? JSON.parse(p.materials_json) : p.materials_json;
+                    materials = json.materials || [];
+                    strategies = json.strategies || [];
+                    history = json.history || [];
+                }
+            } catch (e) {
+                console.warn("Error parsing product JSON", e);
+            }
+
+            // Render Timeline
+            historyContainer.innerHTML = '';
+            if(history.length === 0) {
+                historyContainer.innerHTML = '<div class="text-center text-gray-400 italic py-4">Nenhum histórico registrado.</div>';
+            } else {
+                historyContainer.innerHTML = `<div class="relative border-l-2 border-gray-200 ml-3 pl-6 space-y-6">` + 
+                history.map(h => {
+                    let icon = 'fa-info';
+                    let color = 'bg-gray-100 text-gray-600';
+                    let title = h.type === 'price_change' ? 'Preço de Venda' : (h.type === 'cost_change' ? 'Custo Base' : 'Atualização de Material');
+                    
+                    if (h.type === 'price_change') {
+                        if (h.diff > 0) { icon = 'fa-arrow-up'; color = 'bg-green-100 text-green-700'; } // Aumentou preço (bom se vendeu)
+                        else { icon = 'fa-arrow-down'; color = 'bg-orange-100 text-orange-700'; }
+                    } else if (h.type === 'cost_change' || h.type === 'auto_material_update') {
+                        let diff = h.diff !== undefined ? h.diff : h.cost_impact;
+                        if (diff > 0) { icon = 'fa-arrow-up'; color = 'bg-red-100 text-red-700'; } // Custo aumentou (ruim)
+                        else { icon = 'fa-arrow-down'; color = 'bg-green-100 text-green-700'; } // Custo baixou (bom)
+                    }
+
+                    return `
+                    <div class="relative">
+                        <div class="absolute -left-[35px] top-0 ${color} w-6 h-6 rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+                            <i class="fas ${icon} text-[10px]"></i>
+                        </div>
+                        <div>
+                            <p class="text-[10px] text-gray-400 font-bold uppercase mb-0.5">${new Date(h.date).toLocaleDateString()} às ${new Date(h.date).toLocaleTimeString().slice(0,5)}</p>
+                            <p class="text-xs font-bold text-gray-700">${h.msg || title}</p>
+                            ${h.details ? `<p class="text-xs text-gray-500">${h.details}</p>` : ''}
+                            ${(h.old !== undefined && h.new !== undefined) ? 
+                                `<p class="text-xs text-gray-500">De <span class="line-through">${fmt(h.old)}</span> para <span class="font-bold text-gray-700">${fmt(h.new)}</span></p>` 
+                                : ''}
+                            ${h.cost_impact ? `<p class="text-[10px] font-bold ${h.cost_impact > 0 ? 'text-red-500' : 'text-green-600'}">Impacto: ${h.cost_impact > 0 ? '+' : ''}${fmt(h.cost_impact)}</p>` : ''}
+                        </div>
+                    </div>`;
+                }).join('') + `</div>`;
+            }
+
+            const cost = p.base_cost || 0;
+            const price = p.selling_price || 0;
+            const margin = price > 0 ? ((price - cost) / price) * 100 : 0;
+            const profit = price - cost;
+
+            if (strategies.length === 0 && price > 0) {
+                strategies.push({ name: 'Preço Base', price: price });
+            }
+
+            content.innerHTML = `
+                <div class="flex gap-4 mb-4">
+                    <div class="w-24 h-24 bg-gray-100 rounded-lg flex items-center justify-center overflow-hidden border shrink-0">
+                        ${p.product_image_data ? `<img src="${p.product_image_data}" class="w-full h-full object-cover">` : '<i class="fas fa-image text-gray-300 text-2xl"></i>'}
+                    </div>
+                    <div class="flex-1">
+                        <div class="text-xs text-gray-500 uppercase font-bold">Preço de Venda (Base)</div>
+                        <div class="text-2xl font-bold text-indigo-600">${fmt(price)}</div>
+                        <div class="flex items-center gap-2 mt-1">
+                             <span class="text-xs font-bold px-2 py-0.5 rounded ${profit > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+                                Lucro: ${fmt(profit)}
+                             </span>
+                             <span class="text-xs text-gray-400">Margem: ${margin.toFixed(1)}%</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <div class="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <div class="text-xs text-gray-500 mb-1">Custo Produção</div>
+                        <div class="font-bold text-gray-700">${fmt(cost)}</div>
+                    </div>
+                    <div class="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <div class="text-xs text-gray-500 mb-1">Qtd Materiais</div>
+                        <div class="font-bold text-gray-700">${materials.length} itens</div>
+                    </div>
+                </div>
+
+                <div class="mt-4">
+                    <h4 class="font-bold text-xs text-gray-700 uppercase mb-2 border-b pb-1">Composição (Materiais)</h4>
+                    ${materials.length > 0 ? `
+                        <div class="space-y-1 max-h-32 overflow-y-auto custom-scrollbar p-1">
+                            ${materials.map(m => `
+                                <div class="flex justify-between text-xs py-1 border-b border-gray-50 last:border-0 hover:bg-gray-50 px-1 rounded">
+                                    <div class="flex-1">
+                                        <div class="font-medium text-gray-700">${m.name}</div>
+                                        <div class="text-[10px] text-gray-400">${m.qty} x ${fmt(m.unit_cost)}</div>
+                                    </div>
+                                    <span class="font-bold text-gray-600">${fmt(m.cost)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : '<div class="text-sm text-gray-400 italic py-2">Nenhum material cadastrado.</div>'}
+                </div>
+
+                <div class="mt-4">
+                    <h4 class="font-bold text-xs text-gray-700 uppercase mb-2 border-b pb-1">Preços por Canal / Estratégia</h4>
+                    ${strategies.length > 0 ? `
+                        <div class="space-y-2 max-h-40 overflow-y-auto custom-scrollbar p-1">
+                            ${strategies.map(s => {
+                                const sPrice = s.price || 0;
+                                let sNet = sPrice - cost;
+                                if(s.pct !== undefined || s.fix !== undefined) {
+                                    const fees = (sPrice * ((s.pct||0)/100)) + (s.fix||0);
+                                    sNet = sPrice - cost - fees;
+                                }
+
+                                return `
+                                <div class="flex justify-between items-center bg-white border border-gray-100 p-2 rounded hover:shadow-sm transition">
+                                    <div>
+                                        <div class="font-bold text-sm text-gray-700">${s.name}</div>
+                                        <div class="text-[10px] text-gray-400">Venda: ${fmt(sPrice)}</div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="font-bold text-xs ${sNet > 0 ? 'text-green-600' : 'text-red-500'}">Lucro: ${fmt(sNet)}</div>
+                                    </div>
+                                </div>
+                            `}).join('')}
+                        </div>
+                    ` : '<div class="text-sm text-gray-400 italic py-2">Nenhuma estratégia de preço salva.</div>'}
+                </div>
+            `;
+
+            document.getElementById('btnViewEdit').onclick = function() {
+                document.getElementById('productViewModal').classList.add('hidden');
+                startEditProduct(id);
+            };
+            
+            document.getElementById('btnViewDelete').onclick = function() {
+                document.getElementById('productViewModal').classList.add('hidden');
+                deleteProduct(id);
+            };
+
+            document.getElementById('productViewModal').classList.remove('hidden');
+        }
+
+        async function saveProduct() { 
+             if(isOfflineMode) return alert("Modo Offline");
+             const name = document.getElementById('productNameInput').value; const img = document.getElementById('productImageBase64Input').value; 
+             const totalCost = calcResumoCusto(); const marginBase = normalizeCurrency(document.getElementById('margemLucroInput').value); 
+             if (document.querySelectorAll('.sim-row').length === 0) renderSimulatorTable(); 
+             const materialsList = []; document.querySelectorAll('.material-row').forEach(row => { materialsList.push({ name: row.querySelector('.material-name').value, qty: normalizeCurrency(row.querySelector('.material-qty').value), unit_cost: normalizeCurrency(row.querySelector('.material-unit-cost').value), cost: normalizeCurrency(row.querySelector('.material-cost').value) }); }); 
+             const strategies = []; let mainPrice = 0; document.querySelectorAll('.sim-row').forEach(row => { const price = parseFloat(row.querySelector('.sim-price-input').value) || 0; strategies.push({ id: row.dataset.id, name: row.querySelector('.sim-name').value, price, pct: parseFloat(row.querySelector('.sim-pct').value)||0, fix: parseFloat(row.querySelector('.sim-fix').value)||0 }); if(row.dataset.id === 'default' || mainPrice === 0) mainPrice = price; }); 
+             if(!name) return alert("Nome do produto obrigatório."); 
+             
+             let existingHistory = [];
+             
+             // Check if editing and compare for history
+             if (editingProductId) {
+                const oldP = currentProductsList.find(p => String(p.id) === String(editingProductId));
+                if (oldP) {
+                    try { const j = typeof oldP.materials_json === 'string' ? JSON.parse(oldP.materials_json) : oldP.materials_json; existingHistory = j.history || []; } catch(e) {}
+                    
+                    const oldPrice = oldP.selling_price || 0;
+                    const oldCost = oldP.base_cost || 0;
+
+                    if (Math.abs(mainPrice - oldPrice) > 0.01) {
+                        existingHistory.unshift({ date: new Date().toISOString(), type: 'price_change', old: oldPrice, new: mainPrice, diff: mainPrice - oldPrice });
+                    }
+                    if (Math.abs(totalCost - oldCost) > 0.01) {
+                        existingHistory.unshift({ date: new Date().toISOString(), type: 'cost_change', old: oldCost, new: totalCost, diff: totalCost - oldCost });
+                    }
+                }
+             } else {
+                 existingHistory.push({ date: new Date().toISOString(), type: 'creation', msg: 'Produto criado' });
+             }
+
+             const baseProd = { user_id: currentUser.id, product_name: name, product_image_data: img, selling_price: mainPrice, base_cost: totalCost, final_margin: marginBase, materials_json: JSON.stringify({ version: 2, materials: materialsList, strategies: strategies, history: existingHistory }) }; 
+             
+             if(editingProductId) { await supabaseClient.from('pricing_products').update(baseProd).eq('id', editingProductId); alert("Atualizado!"); } 
+             else { await supabaseClient.from('pricing_products').insert([{ ...baseProd, created_at: new Date().toISOString() }]); alert("Salvo!"); } 
+             cancelEditProduct(); openProductsModal(); 
+        }
+
+        function startEditProduct(id) { const product = currentProductsList.find(p => String(p.id) === String(id)); if (!product) return; editingProductId = id; document.getElementById('productsModal').classList.add('hidden'); switchModule('pricing'); document.getElementById('productNameInput').value = product.product_name || ''; document.getElementById('productImageBase64Input').value = product.product_image_data || ''; if(product.product_image_data) { document.getElementById('productImagePreview').src = product.product_image_data; document.getElementById('productImagePreviewContainer').classList.remove('hidden'); } document.getElementById('materialsList').innerHTML = ''; currentEditingStrategies = []; try { const parsed = JSON.parse(product.materials_json || '{}'); if(parsed.materials) parsed.materials.forEach(m => addMaterialRow(m.name, m.qty, m.unit_cost, m.cost)); currentEditingStrategies = parsed.strategies || []; } catch(e) { addMaterialRow(); } document.getElementById('margemLucroInput').value = product.final_margin || ''; document.getElementById('precoVendaFinalInput').value = product.selling_price || ''; calcStep1(); calcResumoCusto(); calcPriceSuggestion(); if(product.selling_price) calcRealMargin(); nextStep(6); document.getElementById('btnSaveProduct').innerText = "Salvar Alterações"; document.getElementById('btnCancelEditProduct').classList.remove('hidden'); }
+        function cancelEditProduct() { editingProductId = null; currentEditingStrategies = []; document.getElementById('btnCancelEditProduct').classList.add('hidden'); document.getElementById('btnSaveProduct').innerText = "Salvar Produto"; document.getElementById('productNameInput').value = ''; clearProductImage(); document.getElementById('materialsList').innerHTML = ''; addMaterialRow(); document.getElementById('margemLucroInput').value = ''; document.getElementById('precoVendaFinalInput').value = ''; document.getElementById('sugestaoPreco').innerText = ''; calcStep1(); calcResumoCusto(); nextStep(1); }
+        async function deleteProduct(id) { if(isOfflineMode) return alert("Modo Offline"); if(confirm("Excluir?")) { await supabaseClient.from('pricing_products').delete().eq('id', id); loadProducts(); } }
+        function handleProductImageUpload(f) { resizeToJpegDataUrl(f, 600).then((b64) => { document.getElementById('productImageBase64Input').value = b64; document.getElementById('productImagePreview').src = b64; document.getElementById('productImagePreviewContainer')?.classList.remove('hidden'); }); }
+        function clearProductImage() { document.getElementById('productImageBase64Input').value = ''; document.getElementById('productImagePreview').src = ''; document.getElementById('productImagePreviewContainer')?.classList.add('hidden'); }
+
+        // --- MOCKUP CONFIG ---
+        async function loadGlobalMockupConfig() { if (!supabaseClient || isOfflineMode) return; try { const { data, error } = await supabaseClient.from('app_settings').select('*').eq('id', MOCKUP_SETTINGS_ID).maybeSingle(); if(error) throw error; if (data?.config_data) { mockupConfig = data.config_data; } else { mockupConfig = getDefaultMockupConfigData(); } } catch(e) { console.warn("Offline: Mockup config load failed", e); mockupConfig = getDefaultMockupConfigData(); } }
+        function getDefaultMockupConfigData() { return { template_data_url: MOCKUP_FALLBACK_TEMPLATE_DATA_URL, coords: { leftQuad: MOCKUP_DEFAULT_LEFT_QUAD, rightQuad: MOCKUP_DEFAULT_RIGHT_QUAD } }; }
+        function handleMockupTemplateUpload(f) { resizeToJpegDataUrl(f, 800).then((b64) => { document.getElementById('mockupTemplateBase64Input').value = b64; document.getElementById('mockupTemplatePreviewImage').src = b64; document.getElementById('mockupTemplatePreviewContainer')?.classList.remove('hidden'); }); }
+
+        // --- PRICING SIMULATOR ---
+        function renderSimulatorTable() { const tbody = document.getElementById('marketplaceSimulatorBody'); if(!tbody) return; tbody.innerHTML = ''; const basePrice = normalizeCurrency(document.getElementById('precoVendaFinalInput').value) || normalizeCurrency(document.getElementById('sugestaoPreco').innerText) || calcResumoCusto() * 2; if (currentEditingStrategies && currentEditingStrategies.length > 0) { currentEditingStrategies.forEach(s => { let pct = s.pct, fix = s.fix; if (pct === undefined) { let rule = orderFeeConfig.overrides.find(o => o.id === s.id); if(s.id === 'default') rule = orderFeeConfig.default; pct = rule ? rule.percent : 0; fix = rule ? rule.fixed : 0; } addSimRow(s.id, s.name, pct, fix, s.price); }); } else { loadSimsFromConfig(basePrice); } }
+        function loadSimsFromConfig(basePrice = 0) { const tbody = document.getElementById('marketplaceSimulatorBody'); tbody.innerHTML = ''; if(basePrice === 0) basePrice = normalizeCurrency(document.getElementById('precoVendaFinalInput').value) || calcResumoCusto() * 2; addSimRow('default', 'Padrão', orderFeeConfig.default?.percent || 0, orderFeeConfig.default?.fixed || 0, basePrice); if (orderFeeConfig.overrides) { orderFeeConfig.overrides.forEach(m => addSimRow(m.id, m.name, m.percent, m.fixed, basePrice)); } }
+        function addSimRow(id='manual', name='Novo', feePct=0, feeFix=0, initialPrice=0) { const tbody = document.getElementById('marketplaceSimulatorBody'); const tr = document.createElement('tr'); tr.className = "hover:bg-gray-50 transition sim-row group"; tr.dataset.id = id === 'manual' ? 'manual_' + Math.random().toString(36).substr(2, 5) : id; tr.innerHTML = ` <td class="p-3"><input type="text" class="font-bold text-gray-800 bg-transparent border-b border-transparent hover:border-gray-300 outline-none w-full sim-name" value="${name}"></td> <td class="p-3"><div class="flex items-center"><input type="number" class="w-12 p-1 border rounded text-xs sim-pct" value="${feePct}" oninput="recalcSimRow(this)">%</div></td> <td class="p-3"><div class="flex items-center">R$<input type="number" class="w-12 p-1 border rounded text-xs sim-fix" value="${feeFix}" oninput="recalcSimRow(this)"></div></td> <td class="p-3"><div class="flex items-center border rounded bg-white overflow-hidden focus-within:ring-2 ring-indigo-200"><span class="pl-2 text-gray-500 text-xs">R$</span><input type="number" step="0.01" class="w-full p-2 text-sm outline-none font-bold text-gray-700 sim-price-input" value="${Number(initialPrice).toFixed(2)}" oninput="recalcSimRow(this)"></div></td> <td class="p-3 text-right"><div class="font-bold text-lg sim-profit-display">...</div><div class="text-[10px] text-gray-400 sim-margin-display">...</div></td> <td class="p-3 text-right"><button onclick="this.closest('tr').remove()" class="text-gray-300 hover:text-red-500"><i class="fas fa-trash"></i></button></td> `; tbody.appendChild(tr); recalcSimRow(tr.querySelector('.sim-price-input')); }
+        function recalcSimRow(input) { const row = input.closest('tr'); const price = parseFloat(row.querySelector('.sim-price-input').value) || 0; const pct = parseFloat(row.querySelector('.sim-pct').value) || 0; const fix = parseFloat(row.querySelector('.sim-fix').value) || 0; const baseCost = calcResumoCusto(); const totalFee = (price * (pct / 100)) + fix; const profit = price - baseCost - totalFee; const margin = price > 0 ? (profit / price) * 100 : 0; const pEl = row.querySelector('.sim-profit-display'); pEl.innerText = fmt(profit); pEl.className = `font-bold text-lg sim-profit-display ${profit > 0 ? 'text-green-600' : 'text-red-500'}`; row.querySelector('.sim-margin-display').innerText = `${margin.toFixed(1)}% margem`; }
+
+        // --- INIT ---
+        if (typeof bootstrapAuth === 'function') bootstrapAuth();
+    </script>
+</body>
+</html>
