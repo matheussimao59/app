@@ -1139,12 +1139,14 @@
             let materials = [];
             let strategies = [];
             let history = [];
+            let kitQty = 1;
             try {
                 if (p.materials_json) {
                     const json = typeof p.materials_json === 'string' ? JSON.parse(p.materials_json) : p.materials_json;
                     materials = json.materials || [];
                     strategies = json.strategies || [];
                     history = json.history || [];
+                    kitQty = Math.max(1, Math.floor(Number(json.kit_qty) || 1));
                 }
             } catch (e) {
                 console.warn("Error parsing product JSON", e);
@@ -1214,7 +1216,7 @@
                     </div>
                 </div>
                 
-                <div class="grid grid-cols-2 gap-3 mb-4">
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
                     <div class="bg-gray-50 p-3 rounded-lg border border-gray-100">
                         <div class="text-xs text-gray-500 mb-1">Custo Produção</div>
                         <div class="font-bold text-gray-700">${fmt(cost)}</div>
@@ -1222,6 +1224,10 @@
                     <div class="bg-gray-50 p-3 rounded-lg border border-gray-100">
                         <div class="text-xs text-gray-500 mb-1">Qtd Materiais</div>
                         <div class="font-bold text-gray-700">${materials.length} itens</div>
+                    </div>
+                    <div class="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <div class="text-xs text-gray-500 mb-1">Qtd Kit</div>
+                        <div class="font-bold text-gray-700">${kitQty} un</div>
                     </div>
                 </div>
 
