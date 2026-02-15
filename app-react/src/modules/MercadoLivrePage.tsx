@@ -9,9 +9,11 @@ type SellerProfile = {
 };
 
 type OrderItem = {
+  id?: string;
   title?: string;
   quantity?: number;
   unit_price?: number;
+  seller_sku?: string;
 };
 
 type Order = {
@@ -20,11 +22,9 @@ type Order = {
   status?: string;
   total_amount?: number;
   paid_amount?: number;
+  shipping_cost?: number;
+  taxes_amount?: number;
   order_items?: Array<{ item?: OrderItem; quantity?: number; unit_price?: number }>;
-};
-
-type OrdersResponse = {
-  results?: Order[];
 };
 
 type SyncResponse = {
@@ -38,19 +38,68 @@ type DashboardStats = {
   grossRevenue: number;
   paidRevenue: number;
   avgTicket: number;
+  cancelledCount: number;
+  cancelledAmount: number;
+  feesEstimated: number;
+  taxesEstimated: number;
+  shippingEstimated: number;
+  profitEstimated: number;
+  avgProfit: number;
 };
 
 type TopProduct = {
   title: string;
   units: number;
   amount: number;
+  share: number;
 };
+
+type OrderLine = {
+  id: number;
+  title: string;
+  sku: string;
+  date: string;
+  qty: number;
+  amount: number;
+  fee: number;
+  profit: number;
+  status: string;
+};
+
+const PERIODS = [
+  { label: "Hoje", days: 1 },
+  { label: "Ontem", days: 2 },
+  { label: "7 dias", days: 7 },
+  { label: "30 dias", days: 30 },
+  { label: "Mes atual", days: 31 }
+];
 
 function fmtMoney(value: number) {
   return (Number(value) || 0).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL"
   });
+}
+
+function fmtDate(value?: string) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function normalizeStatus(status?: string) {
+  const s = String(status || "").toLowerCase();
+  if (s.includes("cancel")) return "Cancelada";
+  if (s.includes("paid")) return "Paga";
+  if (s.includes("payment")) return "Pagamento";
+  if (s.includes("deliv")) return "Entregue";
+  return status || "-";
 }
 
 function tokenSettingId(userId: string) {
@@ -105,17 +154,42 @@ async function createCodeChallenge(verifier: string) {
   return base64UrlEncode(digest);
 }
 
-function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: TopProduct[] } {
-  const ordersCount = orders.length;
+function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: TopProduct[]; lines: OrderLine[] } {
+  const validOrders = orders.filter((order) => !String(order.status || "").toLowerCase().includes("cancel"));
+  const ordersCount = validOrders.length;
   let unitsCount = 0;
   let grossRevenue = 0;
   let paidRevenue = 0;
+  let cancelledCount = 0;
+  let cancelledAmount = 0;
+  let feesEstimated = 0;
+  let taxesEstimated = 0;
+  let shippingEstimated = 0;
   const topMap = new Map<string, { units: number; amount: number }>();
+  const lines: OrderLine[] = [];
 
   for (const order of orders) {
-    grossRevenue += Number(order.total_amount) || 0;
-    paidRevenue += Number(order.paid_amount) || 0;
+    const total = Number(order.total_amount) || 0;
+    const paid = Number(order.paid_amount) || 0;
+    const fee = Math.max(total - paid, 0);
+    const taxes = Number(order.taxes_amount) || 0;
+    const shipping = Number(order.shipping_cost) || 0;
+    const isCancelled = String(order.status || "").toLowerCase().includes("cancel");
     const items = order.order_items || [];
+    let rowQty = 0;
+    let rowTitle = "Produto sem titulo";
+    let rowSku = "-";
+
+    if (isCancelled) {
+      cancelledCount += 1;
+      cancelledAmount += total;
+    } else {
+      grossRevenue += total;
+      paidRevenue += paid;
+      feesEstimated += fee;
+      taxesEstimated += taxes;
+      shippingEstimated += shipping;
+    }
 
     for (const row of items) {
       const item = row.item || {};
@@ -124,20 +198,41 @@ function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: To
       const title = item.title?.trim() || "Produto sem titulo";
       const amount = qty * unitPrice;
 
-      unitsCount += qty;
-      const current = topMap.get(title) || { units: 0, amount: 0 };
-      current.units += qty;
-      current.amount += amount;
-      topMap.set(title, current);
+      if (!isCancelled) {
+        unitsCount += qty;
+        const current = topMap.get(title) || { units: 0, amount: 0 };
+        current.units += qty;
+        current.amount += amount;
+        topMap.set(title, current);
+      }
+
+      rowQty += qty;
+      if (rowTitle === "Produto sem titulo" && title) rowTitle = title;
+      if (rowSku === "-" && item.seller_sku) rowSku = item.seller_sku;
     }
+
+    lines.push({
+      id: order.id,
+      title: rowTitle,
+      sku: rowSku,
+      date: fmtDate(order.date_created),
+      qty: rowQty,
+      amount: total,
+      fee,
+      profit: total - fee - taxes - shipping,
+      status: normalizeStatus(order.status)
+    });
   }
 
   const avgTicket = ordersCount > 0 ? grossRevenue / ordersCount : 0;
+  const profitEstimated = grossRevenue - feesEstimated - taxesEstimated - shippingEstimated;
+  const avgProfit = ordersCount > 0 ? profitEstimated / ordersCount : 0;
   const topProducts = [...topMap.entries()]
     .map(([title, values]) => ({
       title,
       units: values.units,
-      amount: values.amount
+      amount: values.amount,
+      share: grossRevenue > 0 ? (values.amount / grossRevenue) * 100 : 0
     }))
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 6);
@@ -148,9 +243,17 @@ function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: To
       unitsCount,
       grossRevenue,
       paidRevenue,
-      avgTicket
+      avgTicket,
+      cancelledCount,
+      cancelledAmount,
+      feesEstimated,
+      taxesEstimated,
+      shippingEstimated,
+      profitEstimated,
+      avgProfit
     },
-    topProducts
+    topProducts,
+    lines: lines.sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 20)
   };
 }
 
@@ -163,13 +266,14 @@ export function MercadoLivrePage() {
   const [seller, setSeller] = useState<SellerProfile | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [oauthCode, setOauthCode] = useState<string | null>(null);
+  const [rangeDays, setRangeDays] = useState(30);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const handledOauthCodeRef = useRef<string | null>(null);
 
   const viteEnv = ((import.meta as any)?.env || {}) as Record<string, string | undefined>;
   const fallbackMlClientId = "3165979914917791";
   const clientId = (viteEnv.VITE_ML_CLIENT_ID || fallbackMlClientId)?.trim();
   const redirectUri = normalizeMlRedirectUri(viteEnv.VITE_ML_REDIRECT_URI);
-  const adminAccessToken = viteEnv.VITE_ML_ADMIN_ACCESS_TOKEN?.trim();
   const hasOAuthConfig = Boolean(clientId);
 
   useEffect(() => {
@@ -197,9 +301,6 @@ export function MercadoLivrePage() {
         return;
       }
 
-      if (adminAccessToken) {
-        setAccessToken(adminAccessToken);
-      }
     }
 
     function readCodeFromUrl() {
@@ -233,15 +334,15 @@ export function MercadoLivrePage() {
     void completeOAuthAndSync(oauthCode);
   }, [oauthCode, userId]);
 
-  const statsAndTop = useMemo(() => computeStats(orders), [orders]);
+  const dashboard = useMemo(() => computeStats(orders), [orders]);
 
-  async function syncData(token: string) {
+  async function syncData(token: string, days = rangeDays) {
     setLoading(true);
     setSyncError(null);
     setSyncInfo(null);
 
     try {
-      const fromDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
       if (!supabase) {
         throw new Error("Supabase nao configurado para sincronizar.");
       }
@@ -259,7 +360,8 @@ export function MercadoLivrePage() {
 
       setSeller(payload.seller);
       setOrders(payload.orders || []);
-      setSyncInfo("Dados sincronizados com sucesso (janela de 30 dias).");
+      setLastSyncAt(new Date().toISOString());
+      setSyncInfo(`Dados sincronizados com sucesso (${days} dias).`);
     } catch (error) {
       const message =
         error instanceof Error
@@ -280,7 +382,7 @@ export function MercadoLivrePage() {
     if (supabase && userId) {
       await supabase.from("app_settings").delete().eq("id", tokenSettingId(userId));
     }
-    setAccessToken(adminAccessToken || "");
+    setAccessToken("");
     setSeller(null);
     setOrders([]);
     setOauthCode(null);
@@ -352,7 +454,7 @@ export function MercadoLivrePage() {
       window.history.replaceState({}, document.title, cleanUrl);
       setOauthCode(null);
 
-      const fromDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const fromDate = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000).toISOString();
       const { data: syncDataResponse, error: syncErrorResponse } = await supabase.functions.invoke(
         "ml-sync",
         {
@@ -369,6 +471,7 @@ export function MercadoLivrePage() {
 
       setSeller(syncPayload.seller);
       setOrders(syncPayload.orders || []);
+      setLastSyncAt(new Date().toISOString());
       setSyncInfo("Conta conectada e sincronizada com sucesso.");
     } catch (error) {
       const message =
@@ -387,15 +490,27 @@ export function MercadoLivrePage() {
   }
 
   return (
-    <section className="page ml-page">
-      <div className="ml-hero">
+    <section className="page ml-page ml-v2">
+      <div className="ml-v2-hero">
         <div>
-          <p className="eyebrow">Novo modulo</p>
-          <h2>Painel Mercado Livre</h2>
-          <p className="page-text">
-            Conecte sua conta e acompanhe vendas, faturamento, ticket medio e top produtos em um
-            painel unico.
-          </p>
+          <p className="eyebrow">Mercado Livre</p>
+          <h2>Painel de Vendas</h2>
+          <p className="page-text">Layout profissional com indicadores principais para usuarios comuns.</p>
+          <div className="ml-v2-periods">
+            {PERIODS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                className={`ml-pill ${rangeDays === p.days ? "active" : ""}`}
+                onClick={() => {
+                  setRangeDays(p.days);
+                  if (accessToken && !loading) void syncData(accessToken, p.days);
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="ml-hero-actions">
           <button className="primary-btn" onClick={startOAuth} type="button" disabled={loading}>
@@ -412,92 +527,193 @@ export function MercadoLivrePage() {
         </div>
       </div>
 
-      <div className="ml-connection-card">
-        <h3>Conexao</h3>
-        <p className="page-text">
-          Clique em conectar para autorizar sua conta automaticamente.
-        </p>
-        <div className="actions-row">
-          <button className="ghost-btn" onClick={disconnect} type="button">
-            Desconectar conta atual
-          </button>
+      <div className="ml-summary-head">
+        <div>
+          <p className="ml-summary-label">Faturamento</p>
+          <strong>{fmtMoney(dashboard.stats.grossRevenue)}</strong>
         </div>
-
-        {!hasOAuthConfig && (
-          <p className="info">
-            OAuth nao configurado. Adicione `VITE_ML_CLIENT_ID` no arquivo `.env`.
-          </p>
-        )}
-
-        {oauthCode && (
-          <div className="soft-panel">
-            <p>Codigo OAuth detectado</p>
-            <ul>
-              <li>Conexao automatica em andamento.</li>
-              <li>Nenhuma acao manual necessaria.</li>
-            </ul>
-          </div>
-        )}
-
-        {syncError && <p className="error-text">{syncError}</p>}
-        {syncInfo && <p className="page-text">{syncInfo}</p>}
+        <div>
+          <p className="ml-summary-label">Lucro estimado</p>
+          <strong className={dashboard.stats.profitEstimated >= 0 ? "kpi-up" : "kpi-warn"}>
+            {fmtMoney(dashboard.stats.profitEstimated)}
+          </strong>
+        </div>
+        <div>
+          <p className="ml-summary-label">Conta</p>
+          <strong>{seller?.nickname || "Nao conectada"}</strong>
+          <span className="ml-summary-sub">
+            {lastSyncAt ? `Atualizado ${fmtDate(lastSyncAt)}` : "Sem sincronizacao"}
+          </span>
+        </div>
       </div>
 
-      <div className="kpi-grid kpi-grid-4">
+      <div className="kpi-grid kpi-grid-4 ml-kpi-grid">
         <article className="kpi-card elevated">
-          <p>Vendas (30 dias)</p>
-          <strong>{statsAndTop.stats.ordersCount}</strong>
-        </article>
-        <article className="kpi-card elevated">
-          <p>Unidades vendidas</p>
-          <strong>{statsAndTop.stats.unitsCount}</strong>
-        </article>
-        <article className="kpi-card elevated">
-          <p>Faturamento bruto</p>
-          <strong>{fmtMoney(statsAndTop.stats.grossRevenue)}</strong>
+          <p>Vendas</p>
+          <strong>{dashboard.stats.ordersCount}</strong>
+          <span>{dashboard.stats.unitsCount} unidades</span>
         </article>
         <article className="kpi-card elevated">
           <p>Ticket medio</p>
-          <strong>{fmtMoney(statsAndTop.stats.avgTicket)}</strong>
+          <strong>{fmtMoney(dashboard.stats.avgTicket)}</strong>
+        </article>
+        <article className="kpi-card elevated">
+          <p>Lucro medio</p>
+          <strong>{fmtMoney(dashboard.stats.avgProfit)}</strong>
+        </article>
+        <article className="kpi-card elevated">
+          <p>Canceladas</p>
+          <strong>{dashboard.stats.cancelledCount}</strong>
+          <span>{fmtMoney(dashboard.stats.cancelledAmount)}</span>
+        </article>
+        <article className="kpi-card elevated">
+          <p>Tarifas</p>
+          <strong>{fmtMoney(dashboard.stats.feesEstimated)}</strong>
+          <span>Estimado</span>
+        </article>
+        <article className="kpi-card elevated">
+          <p>Impostos</p>
+          <strong>{fmtMoney(dashboard.stats.taxesEstimated)}</strong>
+          <span>Estimado</span>
+        </article>
+        <article className="kpi-card elevated">
+          <p>Frete</p>
+          <strong>{fmtMoney(dashboard.stats.shippingEstimated)}</strong>
+          <span>Estimado</span>
+        </article>
+        <article className="kpi-card elevated">
+          <p>Receita paga</p>
+          <strong>{fmtMoney(dashboard.stats.paidRevenue)}</strong>
         </article>
       </div>
 
-      <div className="ops-grid">
+      <div className="ml-ads-strip">
+        <div>
+          <p>Investimento em Ads</p>
+          <strong>{fmtMoney(0)}</strong>
+        </div>
+        <div>
+          <p>Receita</p>
+          <strong>{fmtMoney(dashboard.stats.grossRevenue)}</strong>
+        </div>
+        <div>
+          <p>ROAS</p>
+          <strong>N/D</strong>
+        </div>
+        <div>
+          <p>ACOS</p>
+          <strong>N/D</strong>
+        </div>
+        <div>
+          <p>TACOS</p>
+          <strong>N/D</strong>
+        </div>
+      </div>
+
+      <div className="ops-grid ml-ops-grid">
+        <article className="ops-card">
+          <h3>Top produtos por faturamento</h3>
+          {dashboard.topProducts.length === 0 ? (
+            <p className="page-text">Sincronize para visualizar produtos mais vendidos.</p>
+          ) : (
+            <div className="ml-top-list">
+              {dashboard.topProducts.map((item) => (
+                <div key={item.title} className="ml-top-item ml-top-item-v2">
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.units} un. • {fmtMoney(item.amount)}</p>
+                  </div>
+                  <div className="ml-share">
+                    <span>{item.share.toFixed(1)}%</span>
+                    <i style={{ width: `${Math.min(100, Math.max(8, item.share))}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </article>
+
         <article className="ops-card">
           <h3>Conta conectada</h3>
           {seller ? (
             <ul className="task-list">
               <li>Seller ID: {seller.id}</li>
               <li>Nickname: {seller.nickname || "-"}</li>
-              <li>
-                Nome: {[seller.first_name, seller.last_name].filter(Boolean).join(" ") || "-"}
-              </li>
-              <li>Receita paga: {fmtMoney(statsAndTop.stats.paidRevenue)}</li>
+              <li>Nome: {[seller.first_name, seller.last_name].filter(Boolean).join(" ") || "-"}</li>
+              <li>Receita paga: {fmtMoney(dashboard.stats.paidRevenue)}</li>
             </ul>
           ) : (
             <p className="page-text">Nenhuma conta sincronizada ainda.</p>
           )}
-        </article>
-
-        <article className="ops-card">
-          <h3>Top produtos por faturamento</h3>
-          {statsAndTop.topProducts.length === 0 ? (
-            <p className="page-text">Sincronize para visualizar produtos mais vendidos.</p>
-          ) : (
-            <div className="ml-top-list">
-              {statsAndTop.topProducts.map((item) => (
-                <div key={item.title} className="ml-top-item">
-                  <div>
-                    <strong>{item.title}</strong>
-                    <p>{item.units} unidade(s)</p>
-                  </div>
-                  <span>{fmtMoney(item.amount)}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="actions-row">
+            <button className="ghost-btn" onClick={disconnect} type="button">
+              Desconectar conta atual
+            </button>
+          </div>
         </article>
       </div>
+
+      <div className="ml-orders-table-wrap">
+        <div className="ml-orders-head">
+          <h3>Pedidos recentes</h3>
+          <span>{dashboard.lines.length} registros</span>
+        </div>
+        <div className="table-wrap">
+          <table className="table clean">
+            <thead>
+              <tr>
+                <th>Pedido</th>
+                <th>Titulo</th>
+                <th>SKU</th>
+                <th>Data</th>
+                <th>Qtde</th>
+                <th>Valor</th>
+                <th>Tarifa</th>
+                <th>Lucro</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dashboard.lines.length === 0 ? (
+                <tr>
+                  <td colSpan={9}>Sem pedidos no periodo selecionado.</td>
+                </tr>
+              ) : (
+                dashboard.lines.map((row) => (
+                  <tr key={row.id}>
+                    <td>#{row.id}</td>
+                    <td className="ml-col-title">{row.title}</td>
+                    <td>{row.sku}</td>
+                    <td>{row.date}</td>
+                    <td>{row.qty}</td>
+                    <td>{fmtMoney(row.amount)}</td>
+                    <td>{fmtMoney(row.fee)}</td>
+                    <td className={row.profit >= 0 ? "profit-up" : "profit-down"}>{fmtMoney(row.profit)}</td>
+                    <td>{row.status}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {oauthCode && (
+        <div className="soft-panel">
+          <p>Codigo OAuth detectado</p>
+          <ul>
+            <li>Conexao automatica em andamento.</li>
+            <li>Nenhuma acao manual necessaria.</li>
+          </ul>
+        </div>
+      )}
+
+      {syncError && <p className="error-text">{syncError}</p>}
+      {syncInfo && <p className="page-text">{syncInfo}</p>}
+
+      {!hasOAuthConfig && (
+        <p className="info">OAuth nao configurado. Adicione `VITE_ML_CLIENT_ID` no arquivo `.env`.</p>
+      )}
     </section>
   );
 }
