@@ -69,15 +69,22 @@ async function fetchOrderPayments(orderId: number, accessToken: string) {
   try {
     const payments = await fetchMl(`/orders/${orderId}/payments`, accessToken);
     if (Array.isArray(payments)) return payments;
-  } catch {
-    // fallback below
+  } catch (error) {
+    console.error("[ml-sync] /orders/{id}/payments falhou", {
+      orderId,
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
 
   try {
     const orderDetail = await fetchMl(`/orders/${orderId}`, accessToken);
     const list = (orderDetail as { payments?: unknown[] })?.payments;
     return Array.isArray(list) ? list : [];
-  } catch {
+  } catch (error) {
+    console.error("[ml-sync] /orders/{id} fallback falhou", {
+      orderId,
+      error: error instanceof Error ? error.message : String(error)
+    });
     return [];
   }
 }
@@ -85,10 +92,19 @@ async function fetchOrderPayments(orderId: number, accessToken: string) {
 async function fetchPaymentDetails(paymentId: string, accessToken: string) {
   try {
     return await fetchMl(`/v1/payments/${paymentId}`, accessToken);
-  } catch {
+  } catch (error) {
+    console.warn("[ml-sync] /v1/payments/{id} falhou, tentando fallback", {
+      paymentId,
+      error: error instanceof Error ? error.message : String(error)
+    });
     try {
       return await fetchMl(`/payments/${paymentId}`, accessToken);
-    } catch {
+    } catch (fallbackError) {
+      console.error("[ml-sync] /payments/{id} fallback falhou", {
+        paymentId,
+        error:
+          fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+      });
       return null;
     }
   }
@@ -111,6 +127,8 @@ async function attachPaymentsToOrders(
   orders: Array<{ id?: number; payments?: unknown[] }>,
   accessToken: string
 ) {
+  let totalPaymentIds = 0;
+  let totalDetailedPayments = 0;
   const concurrency = 8;
   for (let i = 0; i < orders.length; i += concurrency) {
     const chunk = orders.slice(i, i + concurrency);
@@ -123,6 +141,7 @@ async function attachPaymentsToOrders(
         }
         const rawPayments = await fetchOrderPayments(orderId, accessToken);
         const paymentIds = extractPaymentIds(rawPayments);
+        totalPaymentIds += paymentIds.length;
 
         if (paymentIds.length === 0) {
           order.payments = rawPayments;
@@ -133,10 +152,17 @@ async function attachPaymentsToOrders(
           paymentIds.map((paymentId) => fetchPaymentDetails(paymentId, accessToken))
         );
         const full = details.filter(Boolean);
+        totalDetailedPayments += full.length;
         order.payments = full.length > 0 ? full : rawPayments;
       })
     );
   }
+
+  console.log("[ml-sync] resumo pagamentos", {
+    orders: orders.length,
+    paymentIds: totalPaymentIds,
+    detailedPayments: totalDetailedPayments
+  });
 }
 
 serve(async (req) => {
@@ -159,6 +185,11 @@ serve(async (req) => {
     if (!accessToken) {
       return jsonResponse({ error: "missing_access_token" }, 400);
     }
+
+    console.log("[ml-sync] inicio", {
+      fromDate,
+      toDate: toDate || null
+    });
 
     const seller = await fetchMl("/users/me", accessToken);
     const sellerId = (seller as { id?: number })?.id;
@@ -186,6 +217,11 @@ serve(async (req) => {
       const orders = await fetchMl(`/orders/search?${query.toString()}`, accessToken);
       const results = (orders as { results?: unknown[] })?.results || [];
       allOrders.push(...results);
+      console.log("[ml-sync] pagina orders", {
+        page,
+        offset,
+        got: results.length
+      });
 
       if (results.length < limit) break;
       offset += limit;
@@ -219,6 +255,11 @@ serve(async (req) => {
     });
 
     await attachPaymentsToOrders(enrichedOrders, accessToken);
+
+    console.log("[ml-sync] fim", {
+      sellerId,
+      orders: enrichedOrders.length
+    });
 
     return jsonResponse({
       seller,
