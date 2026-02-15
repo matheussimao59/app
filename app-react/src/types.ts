@@ -3,6 +3,7 @@ export type ModuleId =
   | "precificacao"
   | "calendario"
   | "produtos"
+  | "mercado_livre"
   | "configuracoes";
 
 export interface NavItem {

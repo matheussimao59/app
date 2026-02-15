@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+﻿import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { hasSupabaseConfig, supabase } from "../lib/supabase";
 
@@ -77,10 +77,10 @@ export function AuthGate({ children }: AuthGateProps) {
   }
 
   return (
-    <div className="center-screen">
+    <div className="center-screen login-bg">
       <div className="auth-card">
         <h1>Financeiro</h1>
-        <p>Faça login para continuar.</p>
+        <p>Faca login para continuar.</p>
         {info && <p className="info">{info}</p>}
         <form onSubmit={handleSubmit}>
           <label>
@@ -105,7 +105,7 @@ export function AuthGate({ children }: AuthGateProps) {
           <button type="submit">{isSignUp ? "Criar conta" : "Entrar"}</button>
         </form>
         <button className="link-btn" onClick={() => setIsSignUp((v) => !v)}>
-          {isSignUp ? "Já tenho conta" : "Criar nova conta"}
+          {isSignUp ? "Ja tenho conta" : "Criar nova conta"}
         </button>
       </div>
     </div>

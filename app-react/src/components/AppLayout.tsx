@@ -1,33 +1,74 @@
+﻿import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { NavItem } from "../types";
 
-const navItems: NavItem[] = [
+const navItems = [
   { id: "dashboard", label: "Dashboard", path: "/" },
-  { id: "precificacao", label: "Precificação", path: "/precificacao" },
-  { id: "calendario", label: "Calendário", path: "/calendario" },
+  { id: "precificacao", label: "Precificacao", path: "/precificacao" },
+  { id: "calendario", label: "Calendario", path: "/calendario" },
   { id: "produtos", label: "Meus Produtos", path: "/produtos" },
-  { id: "configuracoes", label: "Configurações", path: "/configuracoes" }
+  { id: "mercado_livre", label: "Mercado Livre", path: "/mercado-livre" },
+  { id: "configuracoes", label: "Configuracoes", path: "/configuracoes" }
 ];
 
 export function AppLayout() {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  function closeMenu() {
+    setMenuOpen(false);
+  }
+
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <h2>Financeiro</h2>
+      <aside className={menuOpen ? "sidebar open" : "sidebar"}>
+        <div className="brand">
+          <div className="brand-mark">F</div>
+          <div>
+            <h2>Financeiro</h2>
+            <p>Suite de gestao operacional</p>
+          </div>
+        </div>
+
         <nav>
           {navItems.map((item) => (
             <NavLink
               key={item.id}
               to={item.path}
               end={item.path === "/"}
+              onClick={closeMenu}
               className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}
             >
-              {item.label}
+              <span>{item.label}</span>
             </NavLink>
           ))}
         </nav>
+
+        <div className="sidebar-foot">
+          <p>Sistema React</p>
+          <small>Mesmo padrao visual do original</small>
+        </div>
       </aside>
+
+      {menuOpen && <button className="mobile-overlay" type="button" onClick={closeMenu} />}
+
       <main className="content">
+        <header className="topbar">
+          <button
+            className="mobile-menu-btn"
+            type="button"
+            onClick={() => setMenuOpen((prev) => !prev)}
+            aria-label="Abrir menu"
+          >
+            {menuOpen ? "Fechar" : "Menu"}
+          </button>
+          <div>
+            <h1>Painel Financeiro</h1>
+            <p>Controle de vendas, precificacao e operacao.</p>
+          </div>
+          <div className="top-actions">
+            <button className="ghost-btn">Exportar</button>
+            <button className="primary-btn">Novo lancamento</button>
+          </div>
+        </header>
         <Outlet />
       </main>
     </div>
