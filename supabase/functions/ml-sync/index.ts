@@ -152,6 +152,12 @@ async function attachPaymentsToOrders(
           paymentIds.map((paymentId) => fetchPaymentDetails(paymentId, accessToken))
         );
         const full = details.filter(Boolean);
+        if (paymentIds.length > 0 && full.length === 0) {
+          console.warn("[ml-sync] pagamento sem detalhes, usando fallback da ordem", {
+            orderId,
+            paymentIds
+          });
+        }
         totalDetailedPayments += full.length;
         order.payments = full.length > 0 ? full : rawPayments;
       })

@@ -37,7 +37,13 @@ type Order = {
     charges_details?: Array<{ name?: string; amount?: number }>;
     fee_details?: Array<{ type?: string; amount?: number }>;
   }>;
-  order_items?: Array<{ item?: OrderItem; quantity?: number; unit_price?: number }>;
+  order_items?: Array<{
+    item?: OrderItem;
+    quantity?: number;
+    unit_price?: number;
+    sale_fee?: number;
+    listing_fee?: number;
+  }>;
 };
 
 type SyncResponse = {
@@ -185,7 +191,11 @@ function calcOrderFee(order: Order, total: number, paid: number) {
   for (const row of order.order_items || []) {
     const item = row.item || {};
     const qty = Number(row.quantity ?? item.quantity) || 0;
-    const saleFee = Number(item.sale_fee) || 0;
+    const saleFee =
+      Number(row.sale_fee) ||
+      Number((row as { listing_fee?: number }).listing_fee) ||
+      Number(item.sale_fee) ||
+      0;
     feeByItems += saleFee * Math.max(1, qty);
   }
   if (feeByItems > 0) return feeByItems;
