@@ -419,6 +419,7 @@ export function MercadoLivrePage() {
   const [accessToken, setAccessToken] = useState("");
   const [bootstrapping, setBootstrapping] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [backgroundSyncing, setBackgroundSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
   const [seller, setSeller] = useState<SellerProfile | null>(null);
@@ -639,7 +640,11 @@ export function MercadoLivrePage() {
   async function syncData(token: string, days = rangeDays, silent = false) {
     if (syncRunningRef.current) return;
     syncRunningRef.current = true;
-    setLoading(true);
+    if (silent) {
+      setBackgroundSyncing(true);
+    } else {
+      setLoading(true);
+    }
     if (!silent) {
       setSyncError(null);
       setSyncInfo(null);
@@ -651,13 +656,21 @@ export function MercadoLivrePage() {
         throw new Error("Supabase nao configurado para sincronizar.");
       }
 
-      const { data, error } = await supabase.functions.invoke("ml-sync", {
+      const invokePromise = supabase.functions.invoke("ml-sync", {
         body: {
           access_token: token,
           from_date: fromDate,
-          to_date: toDate
+          to_date: toDate,
+          include_payments_details: !silent
         }
       });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("timeout_sync")), 15000)
+      );
+      const { data, error } = (await Promise.race([invokePromise, timeoutPromise])) as {
+        data: unknown;
+        error: { message?: string } | null;
+      };
 
       if (error) throw new Error(error.message);
       const payload = (data || {}) as SyncResponse;
@@ -676,16 +689,21 @@ export function MercadoLivrePage() {
         error instanceof Error
           ? error.message
           : "Falha ao sincronizar dados do Mercado Livre.";
+      const normalizedMessage =
+        message === "timeout_sync"
+          ? "A sincronizacao demorou mais que o esperado. Tente novamente em alguns segundos."
+          : message;
       const hint =
-        message.includes("Failed to send a request to the Edge Function") ||
-        message.includes("FunctionsFetchError")
+        normalizedMessage.includes("Failed to send a request to the Edge Function") ||
+        normalizedMessage.includes("FunctionsFetchError")
           ? " Verifique se a funcao `ml-sync` foi deployada no Supabase."
           : "";
       if (!silent) {
-        setSyncError(`Nao foi possivel sincronizar. Verifique token/permissoes. Detalhe: ${message}.${hint}`);
+        setSyncError(`Nao foi possivel sincronizar. Verifique token/permissoes. Detalhe: ${normalizedMessage}.${hint}`);
       }
     } finally {
       setLoading(false);
+      setBackgroundSyncing(false);
       syncRunningRef.current = false;
     }
   }
@@ -778,7 +796,8 @@ export function MercadoLivrePage() {
           body: {
             access_token: token,
             from_date: fromDate,
-            to_date: toDate
+            to_date: toDate,
+            include_payments_details: false
           }
         }
       );
@@ -838,9 +857,9 @@ export function MercadoLivrePage() {
             className="ghost-btn"
             onClick={() => syncData(accessToken)}
             type="button"
-            disabled={!accessToken || loading}
+            disabled={!accessToken || loading || backgroundSyncing}
           >
-            {loading ? "Sincronizando..." : "Sincronizar agora"}
+            {loading || backgroundSyncing ? "Sincronizando..." : "Sincronizar agora"}
           </button>
         </div>
       </div>

@@ -187,6 +187,7 @@ serve(async (req) => {
       String(payload?.from_date || "").trim() ||
       new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const toDate = String(payload?.to_date || "").trim();
+    const includePaymentsDetails = Boolean(payload?.include_payments_details);
 
     if (!accessToken) {
       return jsonResponse({ error: "missing_access_token" }, 400);
@@ -260,11 +261,19 @@ serve(async (req) => {
       return orderAny;
     });
 
-    await attachPaymentsToOrders(enrichedOrders, accessToken);
+    if (!includePaymentsDetails) {
+      // modo rapido para auto-sync: evita chamadas pesadas em lote por pagamento
+      for (const order of enrichedOrders) {
+        order.payments = [];
+      }
+    } else {
+      await attachPaymentsToOrders(enrichedOrders, accessToken);
+    }
 
     console.log("[ml-sync] fim", {
       sellerId,
-      orders: enrichedOrders.length
+      orders: enrichedOrders.length,
+      includePaymentsDetails
     });
 
     return jsonResponse({
