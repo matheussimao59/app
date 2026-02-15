@@ -56,6 +56,21 @@ function normalizeMlRedirectUri(input?: string) {
   const base = (input || `${window.location.origin}/mercado-livre`).trim();
   try {
     const url = new URL(base);
+    const currentHost = window.location.hostname;
+    const inputHost = url.hostname;
+
+    // Evita usar redirect de dominio errado em producao (ex: .com vs .com.br).
+    if (
+      input &&
+      inputHost &&
+      currentHost &&
+      inputHost !== currentHost &&
+      currentHost !== "localhost" &&
+      currentHost !== "127.0.0.1"
+    ) {
+      return `${window.location.origin}/mercado-livre`;
+    }
+
     // Se vier sem caminho ("/"), força callback da página do módulo.
     if (!url.pathname || url.pathname === "/") {
       url.pathname = "/mercado-livre";
