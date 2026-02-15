@@ -14,7 +14,7 @@ type OrderItem = {
   quantity?: number;
   unit_price?: number;
   seller_sku?: string;
-  thumbnail?: string;
+  thumbnail?: string; 
   sale_fee?: number;
 };
 
