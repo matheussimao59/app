@@ -15,6 +15,7 @@ type OrderItem = {
   unit_price?: number;
   seller_sku?: string;
   thumbnail?: string;
+  sale_fee?: number;
 };
 
 type Order = {
@@ -163,6 +164,11 @@ function calcPaymentFee(payment: NonNullable<Order["payments"]>[number]) {
     .reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
   if (feeDetail > 0) return feeDetail;
 
+  const transactionAmount = Number(payment.transaction_amount) || 0;
+  const totalPaidAmount = Number(payment.total_paid_amount) || 0;
+  const diff = Math.max(transactionAmount - totalPaidAmount, 0);
+  if (diff > 0) return diff;
+
   return 0;
 }
 
@@ -174,6 +180,16 @@ function calcOrderFee(order: Order, total: number, paid: number) {
     feeByPayments += calcPaymentFee(p);
   }
   if (feeByPayments > 0) return feeByPayments;
+
+  let feeByItems = 0;
+  for (const row of order.order_items || []) {
+    const item = row.item || {};
+    const qty = Number(row.quantity ?? item.quantity) || 0;
+    const saleFee = Number(item.sale_fee) || 0;
+    feeByItems += saleFee * Math.max(1, qty);
+  }
+  if (feeByItems > 0) return feeByItems;
+
   return Math.max(total - paid, 0);
 }
 

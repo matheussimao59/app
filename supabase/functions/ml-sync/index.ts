@@ -82,6 +82,31 @@ async function fetchOrderPayments(orderId: number, accessToken: string) {
   }
 }
 
+async function fetchPaymentDetails(paymentId: string, accessToken: string) {
+  try {
+    return await fetchMl(`/v1/payments/${paymentId}`, accessToken);
+  } catch {
+    try {
+      return await fetchMl(`/payments/${paymentId}`, accessToken);
+    } catch {
+      return null;
+    }
+  }
+}
+
+function extractPaymentIds(rawPayments: unknown[]) {
+  const ids: string[] = [];
+  for (const p of rawPayments) {
+    if (typeof p === "number" || typeof p === "string") {
+      ids.push(String(p));
+      continue;
+    }
+    const id = String((p as { id?: string | number })?.id || "").trim();
+    if (id) ids.push(id);
+  }
+  return ids;
+}
+
 async function attachPaymentsToOrders(
   orders: Array<{ id?: number; payments?: unknown[] }>,
   accessToken: string
@@ -96,7 +121,19 @@ async function attachPaymentsToOrders(
           order.payments = [];
           return;
         }
-        order.payments = await fetchOrderPayments(orderId, accessToken);
+        const rawPayments = await fetchOrderPayments(orderId, accessToken);
+        const paymentIds = extractPaymentIds(rawPayments);
+
+        if (paymentIds.length === 0) {
+          order.payments = rawPayments;
+          return;
+        }
+
+        const details = await Promise.all(
+          paymentIds.map((paymentId) => fetchPaymentDetails(paymentId, accessToken))
+        );
+        const full = details.filter(Boolean);
+        order.payments = full.length > 0 ? full : rawPayments;
       })
     );
   }
