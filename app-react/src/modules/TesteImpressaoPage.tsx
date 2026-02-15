@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
-type CmyPreset = {
+type BcsPreset = {
   id: string;
-  c: number;
-  m: number;
-  y: number;
+  brightness: number;
+  contrast: number;
+  saturation: number;
 };
 
-type RenderedPreset = CmyPreset & {
+type RenderedPreset = BcsPreset & {
   dataUrl: string;
 };
 
@@ -29,52 +29,24 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function clamp8(value: number) {
-  if (value < 0) return 0;
-  if (value > 255) return 255;
-  return value;
-}
-
-function applyChannel(value: number, delta: number) {
-  if (delta >= 0) {
-    return clamp8(value * (1 - delta));
-  }
-  return clamp8(value + (255 - value) * Math.abs(delta));
-}
-
-function applyCMYToImage(image: HTMLImageElement, preset: CmyPreset): string {
+function applyBCSToImage(image: HTMLImageElement, preset: BcsPreset): string {
   const canvas = document.createElement("canvas");
   canvas.width = image.naturalWidth;
   canvas.height = image.naturalHeight;
   const ctx = canvas.getContext("2d");
   if (!ctx) return image.src;
 
+  ctx.filter = `brightness(${preset.brightness}%) contrast(${preset.contrast}%) saturate(${preset.saturation}%)`;
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-  const buffer = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = buffer.data;
-
-  const c = preset.c / 100;
-  const m = preset.m / 100;
-  const y = preset.y / 100;
-
-  for (let i = 0; i < data.length; i += 4) {
-    data[i] = applyChannel(data[i], c);
-    data[i + 1] = applyChannel(data[i + 1], m);
-    data[i + 2] = applyChannel(data[i + 2], y);
-  }
-
-  ctx.putImageData(buffer, 0, 0);
+  ctx.filter = "none";
   return canvas.toDataURL("image/jpeg", 0.92);
 }
 
-function formatPresetLabel(preset: CmyPreset) {
-  const c = preset.c >= 0 ? `+${preset.c}` : `${preset.c}`;
-  const m = preset.m >= 0 ? `+${preset.m}` : `${preset.m}`;
-  const y = preset.y >= 0 ? `+${preset.y}` : `${preset.y}`;
-  return `C ${c} M ${m} Y ${y}`;
+function formatPresetLabel(preset: BcsPreset) {
+  return `B ${preset.brightness}% | C ${preset.contrast}% | S ${preset.saturation}%`;
 }
 
-function openPrintSheet(rows: RenderedPreset[]) {
+function openPrintPdf(rows: RenderedPreset[]) {
   if (!rows.length) return;
   const popup = window.open("", "_blank", "width=1200,height=920");
   if (!popup) return;
@@ -130,7 +102,7 @@ function openPrintSheet(rows: RenderedPreset[]) {
       <body>
         <header class="head">
           <h1>Teste de Impressao - Epson WF-C5390</h1>
-          <p>Variacoes CMY para calibracao visual de cor.</p>
+          <p>Variacoes de Brilho, Contraste e Saturacao para calibracao visual.</p>
         </header>
         <section class="grid">${tiles}</section>
         <script>window.onload = () => window.print();</script>
@@ -140,32 +112,32 @@ function openPrintSheet(rows: RenderedPreset[]) {
   popup.document.close();
 }
 
-const PRESETS: CmyPreset[] = [
-  { id: "p1", c: -20, m: -10, y: 10 },
-  { id: "p2", c: -15, m: -5, y: 15 },
-  { id: "p3", c: -10, m: -5, y: 15 },
-  { id: "p4", c: -5, m: 0, y: 5 },
-  { id: "p5", c: 0, m: 0, y: 0 },
-  { id: "p6", c: 5, m: 0, y: -5 },
-  { id: "p7", c: 10, m: 5, y: -5 },
-  { id: "p8", c: 15, m: 5, y: -10 },
-  { id: "p9", c: 20, m: 10, y: -10 },
-  { id: "p10", c: -20, m: 10, y: -10 },
-  { id: "p11", c: -15, m: 15, y: 0 },
-  { id: "p12", c: -10, m: 20, y: 10 },
-  { id: "p13", c: -5, m: 5, y: 0 },
-  { id: "p14", c: 0, m: 10, y: 10 },
-  { id: "p15", c: 5, m: 15, y: 15 },
-  { id: "p16", c: 10, m: 20, y: 20 },
-  { id: "p17", c: 15, m: 10, y: 5 },
-  { id: "p18", c: 20, m: 5, y: 0 },
-  { id: "p19", c: -20, m: -20, y: -20 },
-  { id: "p20", c: -10, m: -10, y: -10 },
-  { id: "p21", c: 0, m: -5, y: -5 },
-  { id: "p22", c: 10, m: -10, y: -10 },
-  { id: "p23", c: 20, m: -20, y: -20 },
-  { id: "p24", c: 10, m: 0, y: 10 },
-  { id: "p25", c: -10, m: 0, y: 20 }
+const PRESETS: BcsPreset[] = [
+  { id: "p1", brightness: 80, contrast: 80, saturation: 80 },
+  { id: "p2", brightness: 85, contrast: 90, saturation: 90 },
+  { id: "p3", brightness: 90, contrast: 95, saturation: 95 },
+  { id: "p4", brightness: 95, contrast: 100, saturation: 100 },
+  { id: "p5", brightness: 100, contrast: 100, saturation: 100 },
+  { id: "p6", brightness: 105, contrast: 100, saturation: 95 },
+  { id: "p7", brightness: 110, contrast: 105, saturation: 100 },
+  { id: "p8", brightness: 115, contrast: 110, saturation: 105 },
+  { id: "p9", brightness: 120, contrast: 120, saturation: 110 },
+  { id: "p10", brightness: 80, contrast: 110, saturation: 110 },
+  { id: "p11", brightness: 85, contrast: 115, saturation: 120 },
+  { id: "p12", brightness: 90, contrast: 120, saturation: 130 },
+  { id: "p13", brightness: 95, contrast: 105, saturation: 110 },
+  { id: "p14", brightness: 100, contrast: 110, saturation: 120 },
+  { id: "p15", brightness: 105, contrast: 115, saturation: 130 },
+  { id: "p16", brightness: 110, contrast: 120, saturation: 140 },
+  { id: "p17", brightness: 115, contrast: 110, saturation: 120 },
+  { id: "p18", brightness: 120, contrast: 105, saturation: 110 },
+  { id: "p19", brightness: 80, contrast: 80, saturation: 120 },
+  { id: "p20", brightness: 90, contrast: 90, saturation: 110 },
+  { id: "p21", brightness: 100, contrast: 95, saturation: 105 },
+  { id: "p22", brightness: 110, contrast: 90, saturation: 95 },
+  { id: "p23", brightness: 120, contrast: 85, saturation: 90 },
+  { id: "p24", brightness: 110, contrast: 100, saturation: 120 },
+  { id: "p25", brightness: 90, contrast: 100, saturation: 130 }
 ];
 
 export function TesteImpressaoPage() {
@@ -196,11 +168,11 @@ export function TesteImpressaoPage() {
         const image = await loadImage(sourceDataUrl);
         const next = presets.map((preset) => ({
           ...preset,
-          dataUrl: applyCMYToImage(image, preset)
+          dataUrl: applyBCSToImage(image, preset)
         }));
         if (!active) return;
         setRendered(next);
-        setStatus(`${next.length} variacoes CMY geradas.`);
+        setStatus(`${next.length} variacoes de brilho/contraste/saturacao geradas.`);
       } catch (error) {
         if (!active) return;
         setStatus((error as Error).message);
@@ -223,7 +195,7 @@ export function TesteImpressaoPage() {
           <p className="eyebrow">Epson WF-C5390</p>
           <h2>Teste de Impressao</h2>
           <p className="page-text">
-            Envie uma imagem e gere uma grade de variacoes CMY para ajuste rapido de cor.
+            Envie uma imagem e gere uma grade de variacoes por brilho, contraste e saturacao.
           </p>
         </div>
         <div className="print-test-actions">
@@ -235,9 +207,9 @@ export function TesteImpressaoPage() {
             type="button"
             className="ghost-btn"
             disabled={!rendered.length}
-            onClick={() => openPrintSheet(rendered)}
+            onClick={() => openPrintPdf(rendered)}
           >
-            Imprimir testes
+            Gerar PDF de impressao
           </button>
         </div>
       </div>
