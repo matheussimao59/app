@@ -1107,10 +1107,16 @@
                 grid.innerHTML = items.map(p => { 
                     const cost = p.base_cost || 0; 
                     const price = p.selling_price || 0;
+                    let kitQty = 1;
+                    try {
+                        const parsed = typeof p.materials_json === 'string' ? JSON.parse(p.materials_json) : (p.materials_json || {});
+                        kitQty = Math.max(1, Math.floor(Number(parsed.kit_qty) || 1));
+                    } catch(e) {}
                     return `<div onclick="viewProduct('${p.id}')" class="bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col hover:shadow-lg transition-all duration-300 relative group overflow-hidden cursor-pointer h-full"> 
                         <div class="h-32 w-full bg-white relative border-b border-gray-100">
                              ${p.product_image_data ? `<img src="${p.product_image_data}" class="h-full w-full object-contain p-1">` : '<div class="flex flex-col items-center justify-center h-full text-gray-300"><i class="fas fa-image text-3xl"></i></div>'}
                              ${price > 0 ? `<div class="absolute top-2 right-2 bg-indigo-600 text-white text-xs font-bold px-2 py-1 rounded shadow-sm">${fmt(price)}</div>` : ''}
+                             <div class="absolute top-2 left-2 bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-1 rounded border border-amber-200">Kit: ${kitQty} un</div>
                         </div> 
                         <div class="p-3 flex flex-col justify-between flex-1">
                             <div><h4 class="font-bold text-gray-800 text-sm leading-tight mb-1 line-clamp-2">${p.product_name}</h4></div>
