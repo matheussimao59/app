@@ -254,6 +254,10 @@ function normalizeKey(text?: string) {
     .trim();
 }
 
+function sellerCacheKey(userId: string) {
+  return `ml_seller_cache_${userId}`;
+}
+
 function normalizeMlRedirectUri(input?: string) {
   const base = (input || `${window.location.origin}/mercado-livre`).trim();
   try {
@@ -451,6 +455,15 @@ export function MercadoLivrePage() {
       const token = String(tokenRow?.config_data?.access_token || "").trim();
       if (token) {
         setAccessToken(token);
+        try {
+          const cached = localStorage.getItem(sellerCacheKey(uid));
+          if (cached) {
+            const parsed = JSON.parse(cached) as SellerProfile;
+            if (parsed?.id) setSeller(parsed);
+          }
+        } catch {
+          // ignore
+        }
       }
 
       const { data: productsData } = await supabase
@@ -517,6 +530,7 @@ export function MercadoLivrePage() {
   }, [accessToken, rangeDays, userId]);
 
   const dashboard = useMemo(() => computeStats(orders), [orders]);
+  const isConnected = Boolean(accessToken);
   const productsById = useMemo(() => {
     const map = new Map<string, SavedProduct>();
     for (const p of savedProducts) {
@@ -618,6 +632,9 @@ export function MercadoLivrePage() {
       setSeller(payload.seller);
       setOrders(payload.orders || []);
       setLastSyncAt(new Date().toISOString());
+      if (userId && payload.seller) {
+        localStorage.setItem(sellerCacheKey(userId), JSON.stringify(payload.seller));
+      }
       const label = PERIODS.find((p) => p.days === days)?.label || `${days} dias`;
       setSyncInfo(silent ? `Atualizado automaticamente (${label}).` : `Dados sincronizados com sucesso (${label}).`);
     } catch (error) {
@@ -642,6 +659,9 @@ export function MercadoLivrePage() {
   async function disconnect() {
     if (supabase && userId) {
       await supabase.from("app_settings").delete().eq("id", tokenSettingId(userId));
+    }
+    if (userId) {
+      localStorage.removeItem(sellerCacheKey(userId));
     }
     setAccessToken("");
     setSeller(null);
@@ -734,6 +754,7 @@ export function MercadoLivrePage() {
       setSeller(syncPayload.seller);
       setOrders(syncPayload.orders || []);
       setLastSyncAt(new Date().toISOString());
+      localStorage.setItem(sellerCacheKey(userId), JSON.stringify(syncPayload.seller));
       setSyncInfo("Conta conectada e sincronizada com sucesso.");
     } catch (error) {
       const message =
@@ -801,7 +822,7 @@ export function MercadoLivrePage() {
         </div>
         <div>
           <p className="ml-summary-label">🏪 Conta</p>
-          <strong>{seller?.nickname || "Nao conectada"}</strong>
+          <strong>{seller?.nickname || (isConnected ? "Conta conectada" : "Nao conectada")}</strong>
           <span className="ml-summary-sub">
             {lastSyncAt ? `Atualizado ${fmtDate(lastSyncAt)}` : "Sem sincronizacao"}
           </span>
@@ -903,6 +924,8 @@ export function MercadoLivrePage() {
               <li>Nome: {[seller.first_name, seller.last_name].filter(Boolean).join(" ") || "-"}</li>
               <li>Receita paga: {fmtMoney(dashboard.stats.paidRevenue)}</li>
             </ul>
+          ) : isConnected ? (
+            <p className="page-text">Conta conectada. Sincronizando dados...</p>
           ) : (
             <p className="page-text">Nenhuma conta sincronizada ainda.</p>
           )}
