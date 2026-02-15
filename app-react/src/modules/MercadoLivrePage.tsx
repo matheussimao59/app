@@ -52,6 +52,20 @@ function tokenSettingId(userId: string) {
   return `ml_access_token_${userId}`;
 }
 
+function normalizeMlRedirectUri(input?: string) {
+  const base = (input || `${window.location.origin}/mercado-livre`).trim();
+  try {
+    const url = new URL(base);
+    // Se vier sem caminho ("/"), força callback da página do módulo.
+    if (!url.pathname || url.pathname === "/") {
+      url.pathname = "/mercado-livre";
+    }
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return `${window.location.origin}/mercado-livre`;
+  }
+}
+
 async function fetchMl<T>(path: string, token: string) {
   const response = await fetch(`https://api.mercadolibre.com${path}`, {
     headers: {
@@ -129,8 +143,7 @@ export function MercadoLivrePage() {
   const viteEnv = ((import.meta as any)?.env || {}) as Record<string, string | undefined>;
   const fallbackMlClientId = "3165979914917791";
   const clientId = (viteEnv.VITE_ML_CLIENT_ID || fallbackMlClientId)?.trim();
-  const redirectUriEnv = viteEnv.VITE_ML_REDIRECT_URI?.trim();
-  const redirectUri = redirectUriEnv || `${window.location.origin}/mercado-livre`;
+  const redirectUri = normalizeMlRedirectUri(viteEnv.VITE_ML_REDIRECT_URI);
   const adminAccessToken = viteEnv.VITE_ML_ADMIN_ACCESS_TOKEN?.trim();
   const hasOAuthConfig = Boolean(clientId);
 
