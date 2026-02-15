@@ -262,6 +262,14 @@ function tokenCacheKey(userId: string) {
   return `ml_token_cache_${userId}`;
 }
 
+function ordersCacheKey(userId: string) {
+  return `ml_orders_cache_${userId}`;
+}
+
+function lastSyncCacheKey(userId: string) {
+  return `ml_last_sync_cache_${userId}`;
+}
+
 function normalizeMlRedirectUri(input?: string) {
   const base = (input || `${window.location.origin}/mercado-livre`).trim();
   try {
@@ -425,7 +433,7 @@ export function MercadoLivrePage() {
   const [seller, setSeller] = useState<SellerProfile | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [oauthCode, setOauthCode] = useState<string | null>(null);
-  const [rangeDays, setRangeDays] = useState(30);
+  const [rangeDays, setRangeDays] = useState(1);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [savedProducts, setSavedProducts] = useState<SavedProduct[]>([]);
   const [costLinks, setCostLinks] = useState<CostLinks>({});
@@ -464,6 +472,21 @@ export function MercadoLivrePage() {
         }
       } catch {
         // ignore
+      }
+      try {
+        const cachedOrders = localStorage.getItem(ordersCacheKey(uid));
+        if (cachedOrders) {
+          const parsedOrders = JSON.parse(cachedOrders) as Order[];
+          if (Array.isArray(parsedOrders) && parsedOrders.length > 0) {
+            setOrders(parsedOrders);
+          }
+        }
+      } catch {
+        // ignore
+      }
+      const cachedLastSync = localStorage.getItem(lastSyncCacheKey(uid));
+      if (cachedLastSync) {
+        setLastSyncAt(cachedLastSync);
       }
 
       const { data: tokenRow } = await supabase
@@ -678,9 +701,12 @@ export function MercadoLivrePage() {
 
       setSeller(payload.seller);
       setOrders(payload.orders || []);
-      setLastSyncAt(new Date().toISOString());
+      const syncedAt = new Date().toISOString();
+      setLastSyncAt(syncedAt);
       if (userId && payload.seller) {
         localStorage.setItem(sellerCacheKey(userId), JSON.stringify(payload.seller));
+        localStorage.setItem(ordersCacheKey(userId), JSON.stringify(payload.orders || []));
+        localStorage.setItem(lastSyncCacheKey(userId), syncedAt);
       }
       const label = PERIODS.find((p) => p.days === days)?.label || `${days} dias`;
       setSyncInfo(silent ? `Atualizado automaticamente (${label}).` : `Dados sincronizados com sucesso (${label}).`);
@@ -715,6 +741,8 @@ export function MercadoLivrePage() {
     if (userId) {
       localStorage.removeItem(sellerCacheKey(userId));
       localStorage.removeItem(tokenCacheKey(userId));
+      localStorage.removeItem(ordersCacheKey(userId));
+      localStorage.removeItem(lastSyncCacheKey(userId));
     }
     setAccessToken("");
     setSeller(null);
@@ -808,8 +836,11 @@ export function MercadoLivrePage() {
 
       setSeller(syncPayload.seller);
       setOrders(syncPayload.orders || []);
-      setLastSyncAt(new Date().toISOString());
+      const syncedAt = new Date().toISOString();
+      setLastSyncAt(syncedAt);
       localStorage.setItem(sellerCacheKey(userId), JSON.stringify(syncPayload.seller));
+      localStorage.setItem(ordersCacheKey(userId), JSON.stringify(syncPayload.orders || []));
+      localStorage.setItem(lastSyncCacheKey(userId), syncedAt);
       setSyncInfo("Conta conectada e sincronizada com sucesso.");
     } catch (error) {
       const message =
