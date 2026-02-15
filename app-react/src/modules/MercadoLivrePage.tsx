@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 type SellerProfile = {
@@ -163,6 +163,7 @@ export function MercadoLivrePage() {
   const [seller, setSeller] = useState<SellerProfile | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [oauthCode, setOauthCode] = useState<string | null>(null);
+  const handledOauthCodeRef = useRef<string | null>(null);
 
   const viteEnv = ((import.meta as any)?.env || {}) as Record<string, string | undefined>;
   const fallbackMlClientId = "3165979914917791";
@@ -214,7 +215,7 @@ export function MercadoLivrePage() {
       const code = params.get("code");
       if (!code) return;
       setOauthCode(code);
-      setSyncInfo("Codigo OAuth recebido. Clique em trocar codigo por token.");
+      setSyncInfo("Codigo OAuth recebido. Finalizando conexao automaticamente...");
     }
 
     loadUserAndToken();
@@ -224,6 +225,13 @@ export function MercadoLivrePage() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!oauthCode || !userId) return;
+    if (handledOauthCodeRef.current === oauthCode) return;
+    handledOauthCodeRef.current = oauthCode;
+    void completeOAuthAndSync(oauthCode);
+  }, [oauthCode, userId]);
 
   const statsAndTop = useMemo(() => computeStats(orders), [orders]);
 
@@ -300,23 +308,28 @@ export function MercadoLivrePage() {
     window.location.assign(authUrl.toString());
   }
 
-  async function exchangeCodeWithEdgeFunction() {
+  async function completeOAuthAndSync(code: string) {
     if (!supabase) {
       setSyncError("Supabase nao configurado para trocar o codigo.");
       return;
     }
-    if (!oauthCode) {
+    if (!code) {
       setSyncError("Nao existe codigo OAuth na URL.");
+      return;
+    }
+    if (!userId) {
+      setSyncError("Usuario nao autenticado para salvar token.");
       return;
     }
 
     setLoading(true);
     setSyncError(null);
+    setSyncInfo("Conectando conta e sincronizando...");
 
     try {
       const { data, error } = await supabase.functions.invoke("ml-oauth-token", {
         body: {
-          code: oauthCode,
+          code,
           redirect_uri: redirectUri,
           code_verifier: sessionStorage.getItem("ml_pkce_verifier") || undefined
         }
@@ -326,8 +339,6 @@ export function MercadoLivrePage() {
       const token = String(data?.access_token || "").trim();
       if (!token) throw new Error("Edge Function nao retornou access_token.");
 
-      if (!userId) throw new Error("Usuario nao autenticado para salvar token.");
-
       const { error: saveError } = await supabase.from("app_settings").upsert({
         id: tokenSettingId(userId),
         config_data: { access_token: token }
@@ -336,22 +347,40 @@ export function MercadoLivrePage() {
       if (saveError) throw new Error(saveError.message);
 
       setAccessToken(token);
-      setSyncInfo("Token recebido com sucesso via Edge Function.");
       sessionStorage.removeItem("ml_pkce_verifier");
       const cleanUrl = `${window.location.origin}${window.location.pathname}`;
       window.history.replaceState({}, document.title, cleanUrl);
       setOauthCode(null);
+
+      const fromDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: syncDataResponse, error: syncErrorResponse } = await supabase.functions.invoke(
+        "ml-sync",
+        {
+          body: {
+            access_token: token,
+            from_date: fromDate
+          }
+        }
+      );
+
+      if (syncErrorResponse) throw new Error(syncErrorResponse.message);
+      const syncPayload = (syncDataResponse || {}) as SyncResponse;
+      if (!syncPayload?.seller) throw new Error("Resposta invalida da funcao ml-sync.");
+
+      setSeller(syncPayload.seller);
+      setOrders(syncPayload.orders || []);
+      setSyncInfo("Conta conectada e sincronizada com sucesso.");
     } catch (error) {
       const message =
         error instanceof Error
           ? error.message
-          : "Falha ao trocar codigo por token.";
+          : "Falha ao concluir conexao automatica.";
       const hint =
         message.includes("Failed to send a request to the Edge Function") ||
         message.includes("FunctionsFetchError")
-          ? " Verifique se a funcao `ml-oauth-token` foi deployada no Supabase e se os secrets ML_CLIENT_ID/ML_CLIENT_SECRET estao definidos."
+          ? " Verifique se as funcoes `ml-oauth-token` e `ml-sync` foram deployadas no Supabase e se os secrets ML_CLIENT_ID/ML_CLIENT_SECRET estao definidos."
           : "";
-      setSyncError(`Nao foi possivel trocar o codigo. Detalhe: ${message}.${hint}`);
+      setSyncError(`Nao foi possivel concluir conexao automatica. Detalhe: ${message}.${hint}`);
     } finally {
       setLoading(false);
     }
@@ -369,8 +398,8 @@ export function MercadoLivrePage() {
           </p>
         </div>
         <div className="ml-hero-actions">
-          <button className="primary-btn" onClick={startOAuth} type="button">
-            Conectar conta Mercado Livre
+          <button className="primary-btn" onClick={startOAuth} type="button" disabled={loading}>
+            {loading ? "Conectando..." : "Conectar conta Mercado Livre"}
           </button>
           <button
             className="ghost-btn"
@@ -404,19 +433,9 @@ export function MercadoLivrePage() {
           <div className="soft-panel">
             <p>Codigo OAuth detectado</p>
             <ul>
-              <li>Codigo recebido na URL e pronto para troca por token.</li>
-              <li>
-                Proximo passo seguro: usar Edge Function `ml-oauth-token` com `client_secret`.
-              </li>
+              <li>Conexao automatica em andamento.</li>
+              <li>Nenhuma acao manual necessaria.</li>
             </ul>
-            <button
-              className="primary-btn"
-              onClick={exchangeCodeWithEdgeFunction}
-              type="button"
-              disabled={loading}
-            >
-              Trocar codigo por token (Edge Function)
-            </button>
           </div>
         )}
 
@@ -482,3 +501,4 @@ export function MercadoLivrePage() {
     </section>
   );
 }
+
