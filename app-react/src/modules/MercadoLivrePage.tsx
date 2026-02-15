@@ -258,6 +258,10 @@ function sellerCacheKey(userId: string) {
   return `ml_seller_cache_${userId}`;
 }
 
+function tokenCacheKey(userId: string) {
+  return `ml_token_cache_${userId}`;
+}
+
 function normalizeMlRedirectUri(input?: string) {
   const base = (input || `${window.location.origin}/mercado-livre`).trim();
   try {
@@ -413,6 +417,7 @@ function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: To
 export function MercadoLivrePage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState("");
+  const [bootstrapping, setBootstrapping] = useState(true);
   const [loading, setLoading] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
@@ -446,6 +451,20 @@ export function MercadoLivrePage() {
       setUserId(uid);
 
       if (!uid) return;
+      const cachedToken = localStorage.getItem(tokenCacheKey(uid)) || "";
+      if (cachedToken) {
+        setAccessToken(cachedToken);
+      }
+      try {
+        const cachedSeller = localStorage.getItem(sellerCacheKey(uid));
+        if (cachedSeller) {
+          const parsed = JSON.parse(cachedSeller) as SellerProfile;
+          if (parsed?.id) setSeller(parsed);
+        }
+      } catch {
+        // ignore
+      }
+
       const { data: tokenRow } = await supabase
         .from("app_settings")
         .select("config_data")
@@ -455,6 +474,7 @@ export function MercadoLivrePage() {
       const token = String(tokenRow?.config_data?.access_token || "").trim();
       if (token) {
         setAccessToken(token);
+        localStorage.setItem(tokenCacheKey(uid), token);
         try {
           const cached = localStorage.getItem(sellerCacheKey(uid));
           if (cached) {
@@ -483,6 +503,7 @@ export function MercadoLivrePage() {
         by_sku: rawLinks.by_sku || {},
         by_title: rawLinks.by_title || {}
       });
+      setBootstrapping(false);
     }
 
     function readCodeFromUrl() {
@@ -501,7 +522,7 @@ export function MercadoLivrePage() {
       setSyncInfo("Codigo OAuth recebido. Finalizando conexao automaticamente...");
     }
 
-    loadUserAndToken();
+    loadUserAndToken().finally(() => setBootstrapping(false));
     readCodeFromUrl();
 
     return () => {
@@ -531,6 +552,7 @@ export function MercadoLivrePage() {
 
   const dashboard = useMemo(() => computeStats(orders), [orders]);
   const isConnected = Boolean(accessToken);
+  const isConnectingState = bootstrapping || (isConnected && !seller);
   const productsById = useMemo(() => {
     const map = new Map<string, SavedProduct>();
     for (const p of savedProducts) {
@@ -674,6 +696,7 @@ export function MercadoLivrePage() {
     }
     if (userId) {
       localStorage.removeItem(sellerCacheKey(userId));
+      localStorage.removeItem(tokenCacheKey(userId));
     }
     setAccessToken("");
     setSeller(null);
@@ -742,6 +765,7 @@ export function MercadoLivrePage() {
       if (saveError) throw new Error(saveError.message);
 
       setAccessToken(token);
+      localStorage.setItem(tokenCacheKey(userId), token);
       sessionStorage.removeItem("ml_pkce_verifier");
       const cleanUrl = `${window.location.origin}${window.location.pathname}`;
       window.history.replaceState({}, document.title, cleanUrl);
@@ -834,7 +858,7 @@ export function MercadoLivrePage() {
         </div>
         <div>
           <p className="ml-summary-label">🏪 Conta</p>
-          <strong>{seller?.nickname || (isConnected ? "Conta conectada" : "Nao conectada")}</strong>
+          <strong>{seller?.nickname || (isConnectingState ? "Conectando..." : "Nao conectada")}</strong>
           <span className="ml-summary-sub">
             {lastSyncAt ? `Atualizado ${fmtDate(lastSyncAt)}` : "Sem sincronizacao"}
           </span>
@@ -936,7 +960,7 @@ export function MercadoLivrePage() {
               <li>Nome: {[seller.first_name, seller.last_name].filter(Boolean).join(" ") || "-"}</li>
               <li>Receita paga: {fmtMoney(dashboard.stats.paidRevenue)}</li>
             </ul>
-          ) : isConnected ? (
+          ) : isConnectingState ? (
             <p className="page-text">Conta conectada. Sincronizando dados...</p>
           ) : (
             <p className="page-text">Nenhuma conta sincronizada ainda.</p>
