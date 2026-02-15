@@ -238,6 +238,11 @@ body {
   background: rgba(199, 210, 254, 0.18);
 }
 
+.nav-badge svg {
+  width: 16px;
+  height: 16px;
+}
+
 .nav-item:hover {
   background: #3730a3;
   border-color: rgba(199, 210, 254, 0.25);

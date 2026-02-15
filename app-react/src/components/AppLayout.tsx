@@ -2,14 +2,82 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 const navItems = [
-  { id: "dashboard", label: "Dashboard", path: "/", icon: "DB" },
-  { id: "precificacao", label: "Precificacao", path: "/precificacao", icon: "PR" },
-  { id: "calendario", label: "Calendario", path: "/calendario", icon: "CA" },
-  { id: "produtos", label: "Meus Produtos", path: "/produtos", icon: "MP" },
-  { id: "mercado_livre", label: "Mercado Livre", path: "/mercado-livre", icon: "ML" },
-  { id: "teste_impressao", label: "Teste de Impressao", path: "/teste-impressao", icon: "TI" },
-  { id: "configuracoes", label: "Configuracoes", path: "/configuracoes", icon: "CF" }
+  { id: "dashboard", label: "Dashboard", path: "/" },
+  { id: "precificacao", label: "Precificacao", path: "/precificacao" },
+  { id: "calendario", label: "Calendario", path: "/calendario" },
+  { id: "produtos", label: "Meus Produtos", path: "/produtos" },
+  { id: "mercado_livre", label: "Mercado Livre", path: "/mercado-livre" },
+  { id: "teste_impressao", label: "Teste de Impressao", path: "/teste-impressao" },
+  { id: "configuracoes", label: "Configuracoes", path: "/configuracoes" }
 ];
+
+function NavIcon({ id }: { id: string }) {
+  const props = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.9" } as const;
+
+  if (id === "dashboard") {
+    return (
+      <svg {...props}>
+        <rect x="3" y="3" width="8" height="8" rx="1.4" />
+        <rect x="13" y="3" width="8" height="5" rx="1.4" />
+        <rect x="13" y="10" width="8" height="11" rx="1.4" />
+        <rect x="3" y="13" width="8" height="8" rx="1.4" />
+      </svg>
+    );
+  }
+
+  if (id === "precificacao") {
+    return (
+      <svg {...props}>
+        <path d="M12 3v18" />
+        <path d="M16 7.2c0-1.8-1.8-3.2-4-3.2s-4 1.4-4 3.2 1.8 3.2 4 3.2 4 1.4 4 3.2-1.8 3.2-4 3.2-4-1.4-4-3.2" />
+      </svg>
+    );
+  }
+
+  if (id === "calendario") {
+    return (
+      <svg {...props}>
+        <rect x="3" y="5" width="18" height="16" rx="2" />
+        <path d="M3 9h18M8 3v4M16 3v4" />
+      </svg>
+    );
+  }
+
+  if (id === "produtos") {
+    return (
+      <svg {...props}>
+        <path d="M12 3l8 4-8 4-8-4 8-4z" />
+        <path d="M4 7v10l8 4 8-4V7" />
+      </svg>
+    );
+  }
+
+  if (id === "mercado_livre") {
+    return (
+      <svg {...props}>
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M8 12h8M9 9.5l2.5 2.5L9 14.5M15 9.5L12.5 12l2.5 2.5" />
+      </svg>
+    );
+  }
+
+  if (id === "teste_impressao") {
+    return (
+      <svg {...props}>
+        <rect x="6" y="3.5" width="12" height="6" rx="1.2" />
+        <rect x="4" y="9" width="16" height="8" rx="1.6" />
+        <rect x="7" y="14.5" width="10" height="6" rx="1.2" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg {...props}>
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 2.8v2.1M12 19.1v2.1M4.8 4.8l1.5 1.5M17.7 17.7l1.5 1.5M2.8 12h2.1M19.1 12h2.1M4.8 19.2l1.5-1.5M17.7 6.3l1.5-1.5" />
+    </svg>
+  );
+}
 
 export function AppLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -38,7 +106,9 @@ export function AppLayout() {
               onClick={closeMenu}
               className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}
             >
-              <span className="nav-badge" aria-hidden="true">{item.icon}</span>
+              <span className="nav-badge" aria-hidden="true">
+                <NavIcon id={item.id} />
+              </span>
               <span>{item.label}</span>
             </NavLink>
           ))}
