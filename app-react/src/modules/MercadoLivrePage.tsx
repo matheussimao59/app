@@ -565,7 +565,8 @@ export function MercadoLivrePage() {
       const product = findMatchedProduct(line);
       const unitCost = Number(product?.base_cost) || 0;
       const totalCost = unitCost * Math.max(1, Number(line.qty) || 1);
-      const netProfit = line.profit - totalCost;
+      // Lucro real por venda: valor - tarifa ML - custo do produto
+      const netProfit = line.amount - line.fee - totalCost;
       return {
         ...line,
         linkedProductId: product ? String(product.id) : "",
@@ -576,6 +577,17 @@ export function MercadoLivrePage() {
       };
     });
   }, [dashboard.lines, savedProducts, costLinks, productsById]);
+
+  const realProfitTotal = useMemo(() => {
+    return linesWithCost.reduce((acc, row) => {
+      const cancelled = String(row.status || "").toLowerCase().includes("cancel");
+      return cancelled ? acc : acc + row.netProfit;
+    }, 0);
+  }, [linesWithCost]);
+
+  const realAvgProfit = useMemo(() => {
+    return dashboard.stats.ordersCount > 0 ? realProfitTotal / dashboard.stats.ordersCount : 0;
+  }, [dashboard.stats.ordersCount, realProfitTotal]);
 
   async function saveCostLink(line: OrderLine, productId: string) {
     if (!supabase || !userId) return;
@@ -816,8 +828,8 @@ export function MercadoLivrePage() {
         </div>
         <div>
           <p className="ml-summary-label">📈 Lucro estimado</p>
-          <strong className={dashboard.stats.profitEstimated >= 0 ? "kpi-up" : "kpi-warn"}>
-            {fmtMoney(dashboard.stats.profitEstimated)}
+          <strong className={realProfitTotal >= 0 ? "kpi-up" : "kpi-warn"}>
+            {fmtMoney(realProfitTotal)}
           </strong>
         </div>
         <div>
@@ -841,7 +853,7 @@ export function MercadoLivrePage() {
         </article>
         <article className="kpi-card elevated">
           <p>💹 Lucro medio</p>
-          <strong>{fmtMoney(dashboard.stats.avgProfit)}</strong>
+          <strong>{fmtMoney(realAvgProfit)}</strong>
         </article>
         <article className="kpi-card elevated">
           <p>❌ Canceladas</p>
