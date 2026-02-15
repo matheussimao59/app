@@ -25,6 +25,14 @@ type Order = {
   paid_amount?: number;
   shipping_cost?: number;
   taxes_amount?: number;
+  payments?: Array<{
+    status?: string;
+    marketplace_fee?: number;
+    taxes_amount?: number;
+    shipping_cost?: number;
+    total_paid_amount?: number;
+    transaction_amount?: number;
+  }>;
   order_items?: Array<{ item?: OrderItem; quantity?: number; unit_price?: number }>;
 };
 
@@ -138,6 +146,39 @@ function orderItemThumb(order: Order) {
   return first || "";
 }
 
+function calcOrderFee(order: Order, total: number, paid: number) {
+  const payments = order.payments || [];
+  let feeByPayments = 0;
+  for (const p of payments) {
+    if (String(p.status || "").toLowerCase() === "cancelled") continue;
+    feeByPayments += Number(p.marketplace_fee) || 0;
+  }
+  if (feeByPayments > 0) return feeByPayments;
+  return Math.max(total - paid, 0);
+}
+
+function calcOrderTaxes(order: Order) {
+  const payments = order.payments || [];
+  let taxesByPayments = 0;
+  for (const p of payments) {
+    if (String(p.status || "").toLowerCase() === "cancelled") continue;
+    taxesByPayments += Number(p.taxes_amount) || 0;
+  }
+  const taxesRoot = Number(order.taxes_amount) || 0;
+  return taxesByPayments > 0 ? taxesByPayments : taxesRoot;
+}
+
+function calcOrderShipping(order: Order) {
+  const payments = order.payments || [];
+  let shippingByPayments = 0;
+  for (const p of payments) {
+    if (String(p.status || "").toLowerCase() === "cancelled") continue;
+    shippingByPayments += Number(p.shipping_cost) || 0;
+  }
+  const shippingRoot = Number(order.shipping_cost) || 0;
+  return shippingByPayments > 0 ? shippingByPayments : shippingRoot;
+}
+
 function tokenSettingId(userId: string) {
   return `ml_access_token_${userId}`;
 }
@@ -207,9 +248,9 @@ function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: To
   for (const order of orders) {
     const total = Number(order.total_amount) || 0;
     const paid = Number(order.paid_amount) || 0;
-    const fee = Math.max(total - paid, 0);
-    const taxes = Number(order.taxes_amount) || 0;
-    const shipping = Number(order.shipping_cost) || 0;
+    const fee = calcOrderFee(order, total, paid);
+    const taxes = calcOrderTaxes(order);
+    const shipping = calcOrderShipping(order);
     const isCancelled = String(order.status || "").toLowerCase().includes("cancel");
     const items = order.order_items || [];
     let rowQty = 0;
