@@ -65,6 +65,43 @@ async function fetchItemsThumbs(itemIds: string[], accessToken: string) {
   return thumbById;
 }
 
+async function fetchOrderPayments(orderId: number, accessToken: string) {
+  try {
+    const payments = await fetchMl(`/orders/${orderId}/payments`, accessToken);
+    if (Array.isArray(payments)) return payments;
+  } catch {
+    // fallback below
+  }
+
+  try {
+    const orderDetail = await fetchMl(`/orders/${orderId}`, accessToken);
+    const list = (orderDetail as { payments?: unknown[] })?.payments;
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+async function attachPaymentsToOrders(
+  orders: Array<{ id?: number; payments?: unknown[] }>,
+  accessToken: string
+) {
+  const concurrency = 8;
+  for (let i = 0; i < orders.length; i += concurrency) {
+    const chunk = orders.slice(i, i + concurrency);
+    await Promise.all(
+      chunk.map(async (order) => {
+        const orderId = Number(order.id) || 0;
+        if (!orderId) {
+          order.payments = [];
+          return;
+        }
+        order.payments = await fetchOrderPayments(orderId, accessToken);
+      })
+    );
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -130,6 +167,8 @@ serve(async (req) => {
     const thumbs = await fetchItemsThumbs([...itemIds], accessToken);
     const enrichedOrders = allOrders.map((order) => {
       const orderAny = order as {
+        id?: number;
+        payments?: unknown[];
         order_items?: Array<{ item?: { id?: string; thumbnail?: string } }>;
       };
       const items = orderAny.order_items || [];
@@ -141,6 +180,8 @@ serve(async (req) => {
       }
       return orderAny;
     });
+
+    await attachPaymentsToOrders(enrichedOrders, accessToken);
 
     return jsonResponse({
       seller,

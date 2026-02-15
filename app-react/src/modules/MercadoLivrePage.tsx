@@ -32,6 +32,9 @@ type Order = {
     shipping_cost?: number;
     total_paid_amount?: number;
     transaction_amount?: number;
+    fee_amount?: number;
+    charges_details?: Array<{ name?: string; amount?: number }>;
+    fee_details?: Array<{ type?: string; amount?: number }>;
   }>;
   order_items?: Array<{ item?: OrderItem; quantity?: number; unit_price?: number }>;
 };
@@ -146,12 +149,29 @@ function orderItemThumb(order: Order) {
   return first || "";
 }
 
+function calcPaymentFee(payment: NonNullable<Order["payments"]>[number]) {
+  const direct =
+    Number(payment.marketplace_fee) || Number(payment.fee_amount) || 0;
+  if (direct > 0) return direct;
+
+  const chargeFee = (payment.charges_details || [])
+    .filter((c) => String(c.name || "").toLowerCase().includes("fee"))
+    .reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
+  if (chargeFee > 0) return chargeFee;
+
+  const feeDetail = (payment.fee_details || [])
+    .reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
+  if (feeDetail > 0) return feeDetail;
+
+  return 0;
+}
+
 function calcOrderFee(order: Order, total: number, paid: number) {
   const payments = order.payments || [];
   let feeByPayments = 0;
   for (const p of payments) {
     if (String(p.status || "").toLowerCase() === "cancelled") continue;
-    feeByPayments += Number(p.marketplace_fee) || 0;
+    feeByPayments += calcPaymentFee(p);
   }
   if (feeByPayments > 0) return feeByPayments;
   return Math.max(total - paid, 0);
