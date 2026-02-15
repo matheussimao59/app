@@ -2,11 +2,10 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 const navItems = [
-  { id: "dashboard", label: "Dashboard", path: "/" },
+  { id: "mercado_livre", label: "Mercado Livre", path: "/mercado-livre" },
   { id: "precificacao", label: "Precificacao", path: "/precificacao" },
   { id: "calendario", label: "Calendario", path: "/calendario" },
   { id: "produtos", label: "Meus Produtos", path: "/produtos" },
-  { id: "mercado_livre", label: "Mercado Livre", path: "/mercado-livre" },
   { id: "teste_impressao", label: "Teste de Impressao", path: "/teste-impressao" },
   { id: "configuracoes", label: "Configuracoes", path: "/configuracoes" }
 ];
