@@ -127,7 +127,8 @@ export function MercadoLivrePage() {
   const [oauthCode, setOauthCode] = useState<string | null>(null);
 
   const viteEnv = ((import.meta as any)?.env || {}) as Record<string, string | undefined>;
-  const clientId = viteEnv.VITE_ML_CLIENT_ID?.trim();
+  const fallbackMlClientId = "3165979914917791";
+  const clientId = (viteEnv.VITE_ML_CLIENT_ID || fallbackMlClientId)?.trim();
   const redirectUriEnv = viteEnv.VITE_ML_REDIRECT_URI?.trim();
   const redirectUri = redirectUriEnv || `${window.location.origin}/mercado-livre`;
   const adminAccessToken = viteEnv.VITE_ML_ADMIN_ACCESS_TOKEN?.trim();
