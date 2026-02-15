@@ -2,13 +2,13 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 const navItems = [
-  { id: "dashboard", label: "Dashboard", path: "/" },
-  { id: "precificacao", label: "Precificacao", path: "/precificacao" },
-  { id: "calendario", label: "Calendario", path: "/calendario" },
-  { id: "produtos", label: "Meus Produtos", path: "/produtos" },
-  { id: "mercado_livre", label: "Mercado Livre", path: "/mercado-livre" },
-  { id: "teste_impressao", label: "Teste de Impressao", path: "/teste-impressao" },
-  { id: "configuracoes", label: "Configuracoes", path: "/configuracoes" }
+  { id: "dashboard", label: "Dashboard", path: "/", icon: "DB" },
+  { id: "precificacao", label: "Precificacao", path: "/precificacao", icon: "PR" },
+  { id: "calendario", label: "Calendario", path: "/calendario", icon: "CA" },
+  { id: "produtos", label: "Meus Produtos", path: "/produtos", icon: "MP" },
+  { id: "mercado_livre", label: "Mercado Livre", path: "/mercado-livre", icon: "ML" },
+  { id: "teste_impressao", label: "Teste de Impressao", path: "/teste-impressao", icon: "TI" },
+  { id: "configuracoes", label: "Configuracoes", path: "/configuracoes", icon: "CF" }
 ];
 
 export function AppLayout() {
@@ -38,15 +38,11 @@ export function AppLayout() {
               onClick={closeMenu}
               className={({ isActive }) => (isActive ? "nav-item active" : "nav-item")}
             >
+              <span className="nav-badge" aria-hidden="true">{item.icon}</span>
               <span>{item.label}</span>
             </NavLink>
           ))}
         </nav>
-
-        <div className="sidebar-foot">
-          <p>Sistema React</p>
-          <small>Mesmo padrao visual do original</small>
-        </div>
       </aside>
 
       {menuOpen && <button className="mobile-overlay" type="button" onClick={closeMenu} />}
