@@ -44,6 +44,27 @@ async function fetchMl(path: string, accessToken: string) {
   return parsed;
 }
 
+async function fetchItemsThumbs(itemIds: string[], accessToken: string) {
+  const thumbById = new Map<string, string>();
+  const chunkSize = 20;
+
+  for (let i = 0; i < itemIds.length; i += chunkSize) {
+    const chunk = itemIds.slice(i, i + chunkSize);
+    const query = chunk.map((id) => `ids=${encodeURIComponent(id)}`).join("&");
+    const response = await fetchMl(`/items?${query}`, accessToken);
+    const rows = Array.isArray(response) ? response : [];
+
+    for (const row of rows) {
+      const body = (row as { body?: { id?: string; thumbnail?: string } })?.body;
+      const id = String(body?.id || "").trim();
+      const thumb = String(body?.thumbnail || "").trim();
+      if (id && thumb) thumbById.set(id, thumb);
+    }
+  }
+
+  return thumbById;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -96,9 +117,34 @@ serve(async (req) => {
       offset += limit;
     }
 
+    const itemIds = new Set<string>();
+    for (const order of allOrders) {
+      const orderItems =
+        (order as { order_items?: Array<{ item?: { id?: string } }> })?.order_items || [];
+      for (const row of orderItems) {
+        const id = String(row?.item?.id || "").trim();
+        if (id) itemIds.add(id);
+      }
+    }
+
+    const thumbs = await fetchItemsThumbs([...itemIds], accessToken);
+    const enrichedOrders = allOrders.map((order) => {
+      const orderAny = order as {
+        order_items?: Array<{ item?: { id?: string; thumbnail?: string } }>;
+      };
+      const items = orderAny.order_items || [];
+      for (const row of items) {
+        const itemId = String(row?.item?.id || "").trim();
+        if (!itemId || !row.item) continue;
+        const thumb = thumbs.get(itemId);
+        if (thumb) row.item.thumbnail = thumb;
+      }
+      return orderAny;
+    });
+
     return jsonResponse({
       seller,
-      orders: allOrders
+      orders: enrichedOrders
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "internal_error";

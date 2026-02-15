@@ -917,6 +917,26 @@ body {
   text-overflow: ellipsis;
 }
 
+.ml-thumb {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+}
+
+.ml-thumb-fallback {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  border: 1px dashed #cbd5e1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
+}
+
 .ml-hero {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);

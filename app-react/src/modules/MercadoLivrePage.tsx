@@ -14,6 +14,7 @@ type OrderItem = {
   quantity?: number;
   unit_price?: number;
   seller_sku?: string;
+  thumbnail?: string;
 };
 
 type Order = {
@@ -58,6 +59,7 @@ type OrderLine = {
   id: number;
   title: string;
   sku: string;
+  thumb: string;
   date: string;
   qty: number;
   amount: number;
@@ -129,6 +131,11 @@ function normalizeStatus(status?: string) {
   if (s.includes("payment")) return "Pagamento";
   if (s.includes("deliv")) return "Entregue";
   return status || "-";
+}
+
+function orderItemThumb(order: Order) {
+  const first = order.order_items?.[0]?.item?.thumbnail?.trim();
+  return first || "";
 }
 
 function tokenSettingId(userId: string) {
@@ -244,6 +251,7 @@ function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: To
       id: order.id,
       title: rowTitle,
       sku: rowSku,
+      thumb: orderItemThumb(order),
       date: fmtDate(order.date_created),
       qty: rowQty,
       amount: total,
@@ -298,6 +306,7 @@ export function MercadoLivrePage() {
   const [rangeDays, setRangeDays] = useState(30);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const handledOauthCodeRef = useRef<string | null>(null);
+  const syncRunningRef = useRef(false);
 
   const viteEnv = ((import.meta as any)?.env || {}) as Record<string, string | undefined>;
   const fallbackMlClientId = "3165979914917791";
@@ -363,12 +372,29 @@ export function MercadoLivrePage() {
     void completeOAuthAndSync(oauthCode);
   }, [oauthCode, userId]);
 
+  useEffect(() => {
+    if (!accessToken || !userId) return;
+
+    void syncData(accessToken, rangeDays, true);
+    const timer = window.setInterval(() => {
+      void syncData(accessToken, rangeDays, true);
+    }, 20_000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [accessToken, rangeDays, userId]);
+
   const dashboard = useMemo(() => computeStats(orders), [orders]);
 
-  async function syncData(token: string, days = rangeDays) {
+  async function syncData(token: string, days = rangeDays, silent = false) {
+    if (syncRunningRef.current) return;
+    syncRunningRef.current = true;
     setLoading(true);
-    setSyncError(null);
-    setSyncInfo(null);
+    if (!silent) {
+      setSyncError(null);
+      setSyncInfo(null);
+    }
 
     try {
       const { fromDate, toDate } = getRangeByPeriod(days);
@@ -392,7 +418,7 @@ export function MercadoLivrePage() {
       setOrders(payload.orders || []);
       setLastSyncAt(new Date().toISOString());
       const label = PERIODS.find((p) => p.days === days)?.label || `${days} dias`;
-      setSyncInfo(`Dados sincronizados com sucesso (${label}).`);
+      setSyncInfo(silent ? `Atualizado automaticamente (${label}).` : `Dados sincronizados com sucesso (${label}).`);
     } catch (error) {
       const message =
         error instanceof Error
@@ -403,9 +429,12 @@ export function MercadoLivrePage() {
         message.includes("FunctionsFetchError")
           ? " Verifique se a funcao `ml-sync` foi deployada no Supabase."
           : "";
-      setSyncError(`Nao foi possivel sincronizar. Verifique token/permissoes. Detalhe: ${message}.${hint}`);
+      if (!silent) {
+        setSyncError(`Nao foi possivel sincronizar. Verifique token/permissoes. Detalhe: ${message}.${hint}`);
+      }
     } finally {
       setLoading(false);
+      syncRunningRef.current = false;
     }
   }
 
@@ -536,7 +565,6 @@ export function MercadoLivrePage() {
                 className={`ml-pill ${rangeDays === p.days ? "active" : ""}`}
                 onClick={() => {
                   setRangeDays(p.days);
-                  if (accessToken && !loading) void syncData(accessToken, p.days);
                 }}
               >
                 {p.label}
@@ -561,17 +589,17 @@ export function MercadoLivrePage() {
 
       <div className="ml-summary-head">
         <div>
-          <p className="ml-summary-label">Faturamento</p>
+          <p className="ml-summary-label">💰 Faturamento</p>
           <strong>{fmtMoney(dashboard.stats.grossRevenue)}</strong>
         </div>
         <div>
-          <p className="ml-summary-label">Lucro estimado</p>
+          <p className="ml-summary-label">📈 Lucro estimado</p>
           <strong className={dashboard.stats.profitEstimated >= 0 ? "kpi-up" : "kpi-warn"}>
             {fmtMoney(dashboard.stats.profitEstimated)}
           </strong>
         </div>
         <div>
-          <p className="ml-summary-label">Conta</p>
+          <p className="ml-summary-label">🏪 Conta</p>
           <strong>{seller?.nickname || "Nao conectada"}</strong>
           <span className="ml-summary-sub">
             {lastSyncAt ? `Atualizado ${fmtDate(lastSyncAt)}` : "Sem sincronizacao"}
@@ -581,40 +609,40 @@ export function MercadoLivrePage() {
 
       <div className="kpi-grid kpi-grid-4 ml-kpi-grid">
         <article className="kpi-card elevated">
-          <p>Vendas</p>
+          <p>🛒 Vendas</p>
           <strong>{dashboard.stats.ordersCount}</strong>
           <span>{dashboard.stats.unitsCount} unidades</span>
         </article>
         <article className="kpi-card elevated">
-          <p>Ticket medio</p>
+          <p>🎫 Ticket medio</p>
           <strong>{fmtMoney(dashboard.stats.avgTicket)}</strong>
         </article>
         <article className="kpi-card elevated">
-          <p>Lucro medio</p>
+          <p>💹 Lucro medio</p>
           <strong>{fmtMoney(dashboard.stats.avgProfit)}</strong>
         </article>
         <article className="kpi-card elevated">
-          <p>Canceladas</p>
+          <p>❌ Canceladas</p>
           <strong>{dashboard.stats.cancelledCount}</strong>
           <span>{fmtMoney(dashboard.stats.cancelledAmount)}</span>
         </article>
         <article className="kpi-card elevated">
-          <p>Tarifas</p>
+          <p>🧾 Tarifas</p>
           <strong>{fmtMoney(dashboard.stats.feesEstimated)}</strong>
           <span>Estimado</span>
         </article>
         <article className="kpi-card elevated">
-          <p>Impostos</p>
+          <p>🏛️ Impostos</p>
           <strong>{fmtMoney(dashboard.stats.taxesEstimated)}</strong>
           <span>Estimado</span>
         </article>
         <article className="kpi-card elevated">
-          <p>Frete</p>
+          <p>🚚 Frete</p>
           <strong>{fmtMoney(dashboard.stats.shippingEstimated)}</strong>
           <span>Estimado</span>
         </article>
         <article className="kpi-card elevated">
-          <p>Receita paga</p>
+          <p>💵 Receita paga</p>
           <strong>{fmtMoney(dashboard.stats.paidRevenue)}</strong>
         </article>
       </div>
@@ -694,6 +722,7 @@ export function MercadoLivrePage() {
           <table className="table clean">
             <thead>
               <tr>
+                <th>Foto</th>
                 <th>Pedido</th>
                 <th>Titulo</th>
                 <th>SKU</th>
@@ -708,11 +737,18 @@ export function MercadoLivrePage() {
             <tbody>
               {dashboard.lines.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>Sem pedidos no periodo selecionado.</td>
+                  <td colSpan={10}>Sem pedidos no periodo selecionado.</td>
                 </tr>
               ) : (
                 dashboard.lines.map((row) => (
                   <tr key={row.id}>
+                    <td>
+                      {row.thumb ? (
+                        <img className="ml-thumb" src={row.thumb} alt={row.title} />
+                      ) : (
+                        <span className="ml-thumb-fallback">📦</span>
+                      )}
+                    </td>
                     <td>#{row.id}</td>
                     <td className="ml-col-title">{row.title}</td>
                     <td>{row.sku}</td>
