@@ -1116,7 +1116,10 @@
                         <div class="h-32 w-full bg-white relative border-b border-gray-100">
                              ${p.product_image_data ? `<img src="${p.product_image_data}" class="h-full w-full object-contain p-1">` : '<div class="flex flex-col items-center justify-center h-full text-gray-300"><i class="fas fa-image text-3xl"></i></div>'}
                              ${price > 0 ? `<div class="absolute top-2 right-2 bg-indigo-600 text-white text-xs font-bold px-2 py-1 rounded shadow-sm">${fmt(price)}</div>` : ''}
-                             <div class="absolute top-2 left-2 bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-1 rounded border border-amber-200">Kit: ${kitQty} un</div>
+                             <div class="absolute top-2 left-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white text-[11px] font-extrabold px-2.5 py-1 rounded-full border border-orange-300 shadow-md flex items-center gap-1">
+                                <i class="fas fa-layer-group text-[10px]"></i>
+                                <span>KIT ${kitQty} UN</span>
+                             </div>
                         </div> 
                         <div class="p-3 flex flex-col justify-between flex-1">
                             <div><h4 class="font-bold text-gray-800 text-sm leading-tight mb-1 line-clamp-2">${p.product_name}</h4></div>
