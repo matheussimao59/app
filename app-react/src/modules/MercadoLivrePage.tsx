@@ -74,6 +74,35 @@ const PERIODS = [
   { label: "Mes atual", days: 31 }
 ];
 
+function getRangeByPeriod(days: number) {
+  const now = new Date();
+  const start = new Date(now);
+  const end = new Date(now);
+
+  if (days === 1) {
+    start.setHours(0, 0, 0, 0);
+    return { fromDate: start.toISOString(), toDate: end.toISOString() };
+  }
+
+  if (days === 2) {
+    start.setDate(start.getDate() - 1);
+    start.setHours(0, 0, 0, 0);
+    end.setDate(end.getDate() - 1);
+    end.setHours(23, 59, 59, 999);
+    return { fromDate: start.toISOString(), toDate: end.toISOString() };
+  }
+
+  if (days === 31) {
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+    return { fromDate: start.toISOString(), toDate: end.toISOString() };
+  }
+
+  start.setDate(start.getDate() - (days - 1));
+  start.setHours(0, 0, 0, 0);
+  return { fromDate: start.toISOString(), toDate: end.toISOString() };
+}
+
 function fmtMoney(value: number) {
   return (Number(value) || 0).toLocaleString("pt-BR", {
     style: "currency",
@@ -342,7 +371,7 @@ export function MercadoLivrePage() {
     setSyncInfo(null);
 
     try {
-      const fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+      const { fromDate, toDate } = getRangeByPeriod(days);
       if (!supabase) {
         throw new Error("Supabase nao configurado para sincronizar.");
       }
@@ -350,7 +379,8 @@ export function MercadoLivrePage() {
       const { data, error } = await supabase.functions.invoke("ml-sync", {
         body: {
           access_token: token,
-          from_date: fromDate
+          from_date: fromDate,
+          to_date: toDate
         }
       });
 
@@ -361,7 +391,8 @@ export function MercadoLivrePage() {
       setSeller(payload.seller);
       setOrders(payload.orders || []);
       setLastSyncAt(new Date().toISOString());
-      setSyncInfo(`Dados sincronizados com sucesso (${days} dias).`);
+      const label = PERIODS.find((p) => p.days === days)?.label || `${days} dias`;
+      setSyncInfo(`Dados sincronizados com sucesso (${label}).`);
     } catch (error) {
       const message =
         error instanceof Error
@@ -454,13 +485,14 @@ export function MercadoLivrePage() {
       window.history.replaceState({}, document.title, cleanUrl);
       setOauthCode(null);
 
-      const fromDate = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000).toISOString();
+      const { fromDate, toDate } = getRangeByPeriod(rangeDays);
       const { data: syncDataResponse, error: syncErrorResponse } = await supabase.functions.invoke(
         "ml-sync",
         {
           body: {
             access_token: token,
-            from_date: fromDate
+            from_date: fromDate,
+            to_date: toDate
           }
         }
       );

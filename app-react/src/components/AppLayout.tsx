@@ -51,24 +51,14 @@ export function AppLayout() {
       {menuOpen && <button className="mobile-overlay" type="button" onClick={closeMenu} />}
 
       <main className="content">
-        <header className="topbar">
-          <button
-            className="mobile-menu-btn"
-            type="button"
-            onClick={() => setMenuOpen((prev) => !prev)}
-            aria-label="Abrir menu"
-          >
-            {menuOpen ? "Fechar" : "Menu"}
-          </button>
-          <div>
-            <h1>Painel Financeiro</h1>
-            <p>Controle de vendas, precificacao e operacao.</p>
-          </div>
-          <div className="top-actions">
-            <button className="ghost-btn">Exportar</button>
-            <button className="primary-btn">Novo lancamento</button>
-          </div>
-        </header>
+        <button
+          className="mobile-menu-btn"
+          type="button"
+          onClick={() => setMenuOpen((prev) => !prev)}
+          aria-label="Abrir menu"
+        >
+          {menuOpen ? "Fechar" : "Menu"}
+        </button>
         <Outlet />
       </main>
     </div>

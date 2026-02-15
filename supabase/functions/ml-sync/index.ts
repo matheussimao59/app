@@ -59,6 +59,7 @@ serve(async (req) => {
     const fromDate =
       String(payload?.from_date || "").trim() ||
       new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const toDate = String(payload?.to_date || "").trim();
 
     if (!accessToken) {
       return jsonResponse({ error: "missing_access_token" }, 400);
@@ -70,18 +71,37 @@ serve(async (req) => {
       return jsonResponse({ error: "invalid_seller_response" }, 400);
     }
 
-    const orders = await fetchMl(
-      `/orders/search?seller=${sellerId}&sort=date_desc&limit=50&order.date_created.from=${encodeURIComponent(fromDate)}`,
-      accessToken
-    );
+    const allOrders: unknown[] = [];
+    const limit = 50;
+    let offset = 0;
+    const maxPages = 10;
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const query = new URLSearchParams({
+        seller: String(sellerId),
+        sort: "date_desc",
+        limit: String(limit),
+        offset: String(offset),
+        "order.date_created.from": fromDate
+      });
+      if (toDate) {
+        query.set("order.date_created.to", toDate);
+      }
+
+      const orders = await fetchMl(`/orders/search?${query.toString()}`, accessToken);
+      const results = (orders as { results?: unknown[] })?.results || [];
+      allOrders.push(...results);
+
+      if (results.length < limit) break;
+      offset += limit;
+    }
 
     return jsonResponse({
       seller,
-      orders: (orders as { results?: unknown[] })?.results || []
+      orders: allOrders
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "internal_error";
     return jsonResponse({ error: "sync_failed", message }, 400);
   }
 });
-
