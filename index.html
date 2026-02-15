@@ -473,8 +473,8 @@
     </div>
 
     <script>
-        const SUPABASE_URL = 'https://xawirlorssbucawhnxeh.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhhd2lybG9yc3NidWNhd2hueGVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NzY1NzMsImV4cCI6MjA3ODU1MjU3M30.hlJGmdarLnF6IG_L1552ZVItNKBPrBB4NLhS9DacQ7c';
+        const APP_SUPABASE_URL = 'https://xawirlorssbucawhnxeh.supabase.co';
+        const APP_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhhd2lybG9yc3NidWNhd2hueGVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NzY1NzMsImV4cCI6MjA3ODU1MjU3M30.hlJGmdarLnF6IG_L1552ZVItNKBPrBB4NLhS9DacQ7c';
         const MOCKUP_SETTINGS_ID = 'global_mockup_config_vertical_v1';
         const MOCKUP_FALLBACK_TEMPLATE_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABAAAAAMgCAYAAACkhp+oAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAADsSURBVHhe7cExAQAAAMKg9U9tCy8gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD4GfSQAAeCt76AAAAABJRU5ErkJggg==';
         const MOCKUP_DEFAULT_LEFT_QUAD = { tl: { x: 112, y: 60 }, tr: { x: 406, y: 60 }, br: { x: 406, y: 476 }, bl: { x: 112, y: 476 } };
@@ -523,7 +523,7 @@
         function loadImageFromDataUrl(dataUrl) { return new Promise((resolve, reject) => { if (!dataUrl) return reject(new Error('URL da imagem vazia')); const safeUrl = (typeof dataUrl === 'string') ? dataUrl.trim().replace(/\s/g, '') : dataUrl; const img = new Image(); img.onload = () => resolve(img); img.onerror = () => reject(new Error('Falha ao carregar imagem.')); if (typeof safeUrl === 'string' && safeUrl.startsWith('http')) img.crossOrigin = 'anonymous'; else img.removeAttribute('crossOrigin'); img.src = safeUrl; }); }
         async function resizeToJpegDataUrl(input, maxSize = 600, quality = 0.8) { let dataUrl = input; if (input instanceof Blob || input instanceof File) { dataUrl = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = (e) => resolve(e.target.result); reader.onerror = reject; reader.readAsDataURL(input); }); } const img = await loadImageFromDataUrl(dataUrl); const scale = Math.min(1, maxSize / Math.max(img.width, img.height)); const w = Math.floor(img.width * scale), h = Math.floor(img.height * scale); const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h; const ctx = canvas.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h); return canvas.toDataURL('image/jpeg', quality); }
 
-        try { if (SUPABASE_URL && SUPABASE_KEY && window.supabase?.createClient) supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); } catch (e) { console.error(e); }
+        try { if (APP_SUPABASE_URL && APP_SUPABASE_KEY && window.supabase?.createClient) supabaseClient = window.supabase.createClient(APP_SUPABASE_URL, APP_SUPABASE_KEY); } catch (e) { console.error(e); }
 
         async function bootstrapAuth() { 
             if (!supabaseClient) return showAuthModal('Supabase nÃ£o inicializou.'); 
