@@ -7,6 +7,7 @@ type CalendarOrder = {
   order_id: string;
   image_data: string;
   printed: boolean;
+  printed_at?: string | null;
   created_at?: string;
 };
 
@@ -446,6 +447,23 @@ export function CalendarPage() {
   const markerSurfaceRef = useRef<HTMLDivElement | null>(null);
   const [templateRatio, setTemplateRatio] = useState(16 / 9);
 
+  async function prunePrintedOlderThanFiveDays(userId: string) {
+    if (!supabase) return;
+    const cutoff = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+    const { error } = await supabase
+      .from("calendar_orders")
+      .delete()
+      .eq("user_id", userId)
+      .eq("printed", true)
+      .not("printed_at", "is", null)
+      .lt("printed_at", cutoff);
+
+    if (error) {
+      // Se a coluna printed_at ainda nao existir no banco, nao remove nada automaticamente.
+      console.warn("[calendar] Falha ao limpar impressos antigos:", error.message);
+    }
+  }
+
   async function loadOrders() {
     if (!supabase) {
       setStatus("Supabase nao configurado.");
@@ -460,6 +478,8 @@ export function CalendarPage() {
       setLoading(false);
       return;
     }
+
+    await prunePrintedOlderThanFiveDays(userId);
 
     setLoading(true);
     const { data, error } = await supabase
@@ -907,14 +927,32 @@ export function CalendarPage() {
 
   async function togglePrinted(item: CalendarOrder) {
     if (!supabase) return;
+    const nextPrinted = !item.printed;
+    const payload = {
+      printed: nextPrinted,
+      printed_at: nextPrinted ? new Date().toISOString() : null
+    };
+
     const { error } = await supabase
       .from("calendar_orders")
-      .update({ printed: !item.printed })
+      .update(payload)
       .eq("id", item.id);
 
     if (error) {
-      setStatus(error.message);
-      return;
+      // Compatibilidade com banco antigo sem coluna printed_at.
+      if (error.message.toLowerCase().includes("printed_at")) {
+        const { error: fallbackError } = await supabase
+          .from("calendar_orders")
+          .update({ printed: nextPrinted })
+          .eq("id", item.id);
+        if (fallbackError) {
+          setStatus(fallbackError.message);
+          return;
+        }
+      } else {
+        setStatus(error.message);
+        return;
+      }
     }
     await loadOrders();
   }
