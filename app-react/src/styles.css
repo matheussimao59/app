@@ -287,6 +287,7 @@ body {
   min-height: 100vh;
   padding: 24px;
   overflow: auto;
+  overflow-x: hidden;
 }
 
 .topbar {
@@ -745,6 +746,9 @@ body {
 .ml-page {
   display: grid;
   gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .ml-v2 .kpi-card {
@@ -897,6 +901,9 @@ body {
   border-radius: 12px;
   background: #fff;
   padding: 12px;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .ml-orders-head {
@@ -915,6 +922,20 @@ body {
   font-size: 0.82rem;
 }
 
+.ml-pagination {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+
+.ml-pagination span {
+  font-size: 0.82rem;
+  color: #475569;
+  font-weight: 700;
+}
+
 .ml-col-title {
   max-width: 240px;
   white-space: nowrap;
@@ -922,30 +943,68 @@ body {
   text-overflow: ellipsis;
 }
 
+.ml-v2-hero,
+.ml-summary-head,
+.ml-ads-strip,
+.ml-ops-grid,
+.ml-orders-table-wrap,
+.ml-orders-table-wrap .table-wrap,
+.ml-orders-table-wrap .table.clean {
+  min-width: 0;
+}
+
+.ml-orders-table-wrap .table-wrap {
+  overflow-x: hidden;
+}
+
+.ml-orders-table-wrap .table.clean {
+  min-width: 0;
+  table-layout: auto;
+}
+
+.ml-orders-table-wrap .table.clean th,
+.ml-orders-table-wrap .table.clean td {
+  white-space: normal;
+  word-break: break-word;
+  padding: 7px 6px;
+  font-size: 0.8rem;
+  vertical-align: middle;
+}
+
+.ml-orders-table-wrap .ml-col-title {
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: initial;
+}
+
 .ml-thumb {
-  width: 42px;
-  height: 42px;
+  width: 34px;
+  height: 34px;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid #d1d5db;
   background: #fff;
 }
 
 .ml-thumb-fallback {
-  width: 42px;
-  height: 42px;
-  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
   border: 1px dashed #cbd5e1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: #f8fafc;
+  font-size: 0.72rem;
 }
 
 .ml-cost-cell {
   display: grid;
-  gap: 6px;
-  min-width: 180px;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+  max-width: 220px;
 }
 
 .ml-cost-cell strong {
@@ -954,10 +1013,16 @@ body {
 
 .ml-cost-select {
   border: 1px solid #d1d5db;
-  border-radius: 8px;
+  border-radius: 6px;
   background: #fff;
-  padding: 6px 8px;
-  font-size: 0.78rem;
+  padding: 4px 6px;
+  font-size: 0.74rem;
+  width: 100%;
+  max-width: 220px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ml-hero {

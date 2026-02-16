@@ -421,7 +421,7 @@ function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: To
       avgProfit
     },
     topProducts,
-    lines: lines.sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, 20)
+    lines: lines.sort((a, b) => (a.id < b.id ? 1 : -1))
   };
 }
 
@@ -441,6 +441,7 @@ export function MercadoLivrePage() {
   const [savedProducts, setSavedProducts] = useState<SavedProduct[]>([]);
   const [costLinks, setCostLinks] = useState<CostLinks>({});
   const [savingLinkKey, setSavingLinkKey] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
   const handledOauthCodeRef = useRef<string | null>(null);
   const syncRunningRef = useRef(false);
 
@@ -626,6 +627,23 @@ export function MercadoLivrePage() {
       };
     });
   }, [dashboard.lines, savedProducts, costLinks, productsById]);
+
+  const pageSize = 20;
+  const totalPages = Math.max(1, Math.ceil(linesWithCost.length / pageSize));
+  const pagedLines = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return linesWithCost.slice(start, start + pageSize);
+  }, [linesWithCost, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [rangeDays, orders.length]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const realProfitTotal = useMemo(() => {
     return linesWithCost.reduce((acc, row) => {
@@ -1047,16 +1065,15 @@ export function MercadoLivrePage() {
                 <th>Tarifa</th>
                 <th>Custo Produto</th>
                 <th>Lucro</th>
-                <th>Status</th>
               </tr>
             </thead>
             <tbody>
-              {linesWithCost.length === 0 ? (
+              {pagedLines.length === 0 ? (
                 <tr>
-                  <td colSpan={11}>Sem pedidos no periodo selecionado.</td>
+                  <td colSpan={10}>Sem pedidos no periodo selecionado.</td>
                 </tr>
               ) : (
-                linesWithCost.map((row) => (
+                pagedLines.map((row) => (
                   <tr key={row.id}>
                     <td>
                       {row.thumb ? (
@@ -1084,20 +1101,42 @@ export function MercadoLivrePage() {
                           <option value="">Anexar produto...</option>
                           {savedProducts.map((p) => (
                             <option key={String(p.id)} value={String(p.id)}>
-                              {(p.product_name || "Sem nome")} - {fmtMoney(Number(p.base_cost) || 0)}
+                              {`${(p.product_name || "Sem nome").slice(0, 15)}${(p.product_name || "").length > 15 ? "..." : ""}`} - {fmtMoney(Number(p.base_cost) || 0)}
                             </option>
                           ))}
                         </select>
                       </div>
                     </td>
                     <td className={row.netProfit >= 0 ? "profit-up" : "profit-down"}>{fmtMoney(row.netProfit)}</td>
-                    <td>{row.status}</td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
+        {linesWithCost.length > pageSize && (
+          <div className="ml-pagination">
+            <button
+              type="button"
+              className="ghost-btn"
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            >
+              Anterior
+            </button>
+            <span>
+              Pagina {currentPage} de {totalPages}
+            </span>
+            <button
+              type="button"
+              className="ghost-btn"
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Proxima
+            </button>
+          </div>
+        )}
       </div>
 
       {oauthCode && (
