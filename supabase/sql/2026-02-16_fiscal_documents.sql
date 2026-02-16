@@ -6,11 +6,45 @@ create extension if not exists pgcrypto;
 create table if not exists public.fiscal_settings (
   user_id uuid primary key references auth.users(id) on delete cascade,
   provider_name text not null default 'nuvemfiscal',
+  provider_base_url text not null default 'https://api.nuvemfiscal.com.br',
   environment text not null default 'homologacao' check (environment in ('homologacao', 'producao')),
   invoice_series text not null default '1',
+  cnpj text,
+  ie text,
+  razao_social text,
+  nome_fantasia text,
+  regime_tributario text,
+  email_fiscal text,
+  telefone_fiscal text,
+  cep text,
+  logradouro text,
+  numero text,
+  complemento text,
+  bairro text,
+  cidade text,
+  uf text,
+  certificate_provider_ref text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.fiscal_settings
+add column if not exists provider_base_url text not null default 'https://api.nuvemfiscal.com.br';
+alter table public.fiscal_settings add column if not exists cnpj text;
+alter table public.fiscal_settings add column if not exists ie text;
+alter table public.fiscal_settings add column if not exists razao_social text;
+alter table public.fiscal_settings add column if not exists nome_fantasia text;
+alter table public.fiscal_settings add column if not exists regime_tributario text;
+alter table public.fiscal_settings add column if not exists email_fiscal text;
+alter table public.fiscal_settings add column if not exists telefone_fiscal text;
+alter table public.fiscal_settings add column if not exists cep text;
+alter table public.fiscal_settings add column if not exists logradouro text;
+alter table public.fiscal_settings add column if not exists numero text;
+alter table public.fiscal_settings add column if not exists complemento text;
+alter table public.fiscal_settings add column if not exists bairro text;
+alter table public.fiscal_settings add column if not exists cidade text;
+alter table public.fiscal_settings add column if not exists uf text;
+alter table public.fiscal_settings add column if not exists certificate_provider_ref text;
 
 create table if not exists public.fiscal_documents (
   id uuid primary key default gen_random_uuid(),
@@ -93,4 +127,3 @@ on public.fiscal_documents
 for delete
 to authenticated
 using (auth.uid() = user_id);
-

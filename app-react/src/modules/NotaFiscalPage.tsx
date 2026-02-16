@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 type CachedOrder = {
@@ -39,6 +39,22 @@ type FiscalSettings = {
   invoice_series: string;
   environment: "homologacao" | "producao";
   provider_name: string;
+  provider_base_url: string;
+  cnpj: string;
+  ie: string;
+  razao_social: string;
+  nome_fantasia: string;
+  regime_tributario: string;
+  email_fiscal: string;
+  telefone_fiscal: string;
+  cep: string;
+  logradouro: string;
+  numero: string;
+  complemento: string;
+  bairro: string;
+  cidade: string;
+  uf: string;
+  certificate_provider_ref: string;
 };
 
 function ordersCacheKey(userId: string) {
@@ -86,6 +102,25 @@ function statusLabel(status?: string) {
   return status || "-";
 }
 
+function missingFiscalFields(settings: FiscalSettings) {
+  const required: Array<[keyof FiscalSettings, string]> = [
+    ["cnpj", "CNPJ"],
+    ["razao_social", "Razao social"],
+    ["regime_tributario", "Regime tributario"],
+    ["logradouro", "Logradouro"],
+    ["numero", "Numero"],
+    ["bairro", "Bairro"],
+    ["cidade", "Cidade"],
+    ["uf", "UF"],
+    ["cep", "CEP"],
+    ["certificate_provider_ref", "Referencia do certificado"]
+  ];
+
+  return required
+    .filter(([field]) => !String(settings[field] || "").trim())
+    .map(([, label]) => label);
+}
+
 export function NotaFiscalPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [orders, setOrders] = useState<CachedOrder[]>([]);
@@ -94,10 +129,27 @@ export function NotaFiscalPage() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [issuingOrderId, setIssuingOrderId] = useState<number | null>(null);
+  const [refreshingDocId, setRefreshingDocId] = useState<string | null>(null);
   const [settings, setSettings] = useState<FiscalSettings>({
     invoice_series: "1",
     environment: "homologacao",
-    provider_name: "nuvemfiscal"
+    provider_name: "nuvemfiscal",
+    provider_base_url: "https://api.nuvemfiscal.com.br",
+    cnpj: "",
+    ie: "",
+    razao_social: "",
+    nome_fantasia: "",
+    regime_tributario: "simples_nacional",
+    email_fiscal: "",
+    telefone_fiscal: "",
+    cep: "",
+    logradouro: "",
+    numero: "",
+    complemento: "",
+    bairro: "",
+    cidade: "",
+    uf: "",
+    certificate_provider_ref: ""
   });
 
   useEffect(() => {
@@ -148,19 +200,36 @@ export function NotaFiscalPage() {
 
       const { data: settingsRow } = await supabase
         .from("fiscal_settings")
-        .select("invoice_series, environment, provider_name")
+        .select("*")
         .eq("user_id", uid)
         .maybeSingle();
 
       if (settingsRow && mounted) {
-        setSettings({
+        setSettings((prev) => ({
+          ...prev,
           invoice_series: String(settingsRow.invoice_series || "1"),
           environment:
             String(settingsRow.environment || "homologacao") === "producao"
               ? "producao"
               : "homologacao",
-          provider_name: String(settingsRow.provider_name || "nuvemfiscal")
-        });
+          provider_name: String(settingsRow.provider_name || "nuvemfiscal"),
+          provider_base_url: String(settingsRow.provider_base_url || "https://api.nuvemfiscal.com.br"),
+          cnpj: String(settingsRow.cnpj || ""),
+          ie: String(settingsRow.ie || ""),
+          razao_social: String(settingsRow.razao_social || ""),
+          nome_fantasia: String(settingsRow.nome_fantasia || ""),
+          regime_tributario: String(settingsRow.regime_tributario || "simples_nacional"),
+          email_fiscal: String(settingsRow.email_fiscal || ""),
+          telefone_fiscal: String(settingsRow.telefone_fiscal || ""),
+          cep: String(settingsRow.cep || ""),
+          logradouro: String(settingsRow.logradouro || ""),
+          numero: String(settingsRow.numero || ""),
+          complemento: String(settingsRow.complemento || ""),
+          bairro: String(settingsRow.bairro || ""),
+          cidade: String(settingsRow.cidade || ""),
+          uf: String(settingsRow.uf || ""),
+          certificate_provider_ref: String(settingsRow.certificate_provider_ref || "")
+        }));
       }
 
       if (mounted) {
@@ -197,9 +266,7 @@ export function NotaFiscalPage() {
     if (!supabase || !userId) return;
     const { error: upsertError } = await supabase.from("fiscal_settings").upsert({
       user_id: userId,
-      invoice_series: settings.invoice_series,
-      environment: settings.environment,
-      provider_name: settings.provider_name
+      ...settings
     });
     if (upsertError) {
       setError(`Nao foi possivel salvar configuracoes fiscais: ${upsertError.message}`);
@@ -210,6 +277,13 @@ export function NotaFiscalPage() {
 
   async function emitNf(order: CachedOrder) {
     if (!supabase || !userId) return;
+
+    const missing = missingFiscalFields(settings);
+    if (missing.length > 0) {
+      setError(`Complete os dados fiscais antes de emitir NF: ${missing.join(", ")}.`);
+      return;
+    }
+
     setIssuingOrderId(order.id);
     setError(null);
     setInfo(null);
@@ -221,7 +295,27 @@ export function NotaFiscalPage() {
           order_total: Number(order.total_amount) || 0,
           invoice_series: settings.invoice_series,
           environment: settings.environment,
-          provider_name: settings.provider_name
+          provider_name: settings.provider_name,
+          provider_base_url: settings.provider_base_url,
+          order_title: titleFromOrder(order),
+          buyer_name: buyerFromOrder(order),
+          emitter: {
+            cnpj: settings.cnpj,
+            ie: settings.ie,
+            razao_social: settings.razao_social,
+            nome_fantasia: settings.nome_fantasia,
+            regime_tributario: settings.regime_tributario,
+            email_fiscal: settings.email_fiscal,
+            telefone_fiscal: settings.telefone_fiscal,
+            cep: settings.cep,
+            logradouro: settings.logradouro,
+            numero: settings.numero,
+            complemento: settings.complemento,
+            bairro: settings.bairro,
+            cidade: settings.cidade,
+            uf: settings.uf,
+            certificate_provider_ref: settings.certificate_provider_ref
+          }
         }
       });
 
@@ -233,6 +327,8 @@ export function NotaFiscalPage() {
       const accessKey = String(resp.access_key || "");
       const providerRef = String(resp.provider_ref || "");
       const providerMessage = String(resp.message || "");
+      const xmlUrl = String(resp.xml_url || "");
+      const pdfUrl = String(resp.pdf_url || "");
 
       const { data: savedDoc, error: saveError } = await supabase
         .from("fiscal_documents")
@@ -244,6 +340,8 @@ export function NotaFiscalPage() {
           invoice_series: settings.invoice_series || null,
           access_key: accessKey || null,
           provider_ref: providerRef || null,
+          xml_url: xmlUrl || null,
+          pdf_url: pdfUrl || null,
           error_message: status.includes("error") ? providerMessage || "Falha no emissor." : null,
           issued_at: status.includes("authoriz") ? new Date().toISOString() : null
         })
@@ -265,11 +363,60 @@ export function NotaFiscalPage() {
       const message = emitError instanceof Error ? emitError.message : "Erro ao emitir NF.";
       const friendly =
         message.includes("Function not found") || message.includes("404")
-          ? "Funcao nf-emit nao encontrada. Faça deploy da Edge Function."
+          ? "Funcao nf-emit nao encontrada. Faca deploy da Edge Function."
           : `Falha ao emitir NF: ${message}`;
       setError(friendly);
     } finally {
       setIssuingOrderId(null);
+    }
+  }
+
+  async function refreshDocStatus(doc: FiscalDoc) {
+    if (!supabase || !userId || !doc.provider_ref) return;
+    setRefreshingDocId(doc.id);
+    setError(null);
+    try {
+      const { data: payload, error: fnError } = await supabase.functions.invoke("nf-status", {
+        body: {
+          provider_ref: doc.provider_ref,
+          provider_name: settings.provider_name,
+          provider_base_url: settings.provider_base_url,
+          environment: settings.environment
+        }
+      });
+      if (fnError) throw new Error(fnError.message);
+
+      const resp = (payload || {}) as Record<string, unknown>;
+      const status = String(resp.status || doc.status || "pending_provider");
+      const invoiceNumber = String(resp.invoice_number || doc.invoice_number || "");
+      const accessKey = String(resp.access_key || doc.access_key || "");
+      const xmlUrl = String(resp.xml_url || doc.xml_url || "");
+      const pdfUrl = String(resp.pdf_url || doc.pdf_url || "");
+      const providerMessage = String(resp.message || "");
+
+      const { data: savedDoc, error: saveError } = await supabase
+        .from("fiscal_documents")
+        .update({
+          status,
+          invoice_number: invoiceNumber || null,
+          access_key: accessKey || null,
+          xml_url: xmlUrl || null,
+          pdf_url: pdfUrl || null,
+          error_message: status.includes("error") ? providerMessage || "Falha no emissor." : null,
+          issued_at:
+            status.includes("authoriz") && !doc.issued_at ? new Date().toISOString() : doc.issued_at
+        })
+        .eq("id", doc.id)
+        .select("*")
+        .single();
+      if (saveError) throw new Error(saveError.message);
+
+      setDocs((prev) => prev.map((d) => (d.id === doc.id ? (savedDoc as FiscalDoc) : d)));
+    } catch (statusError) {
+      const message = statusError instanceof Error ? statusError.message : "Falha ao consultar status da NF.";
+      setError(`Nao foi possivel atualizar status: ${message}`);
+    } finally {
+      setRefreshingDocId(null);
     }
   }
 
@@ -278,7 +425,7 @@ export function NotaFiscalPage() {
       <div className="products-head">
         <div>
           <h2>Nota Fiscal</h2>
-          <p className="page-text">Emissao inicial de NF por pedido com status salvo no Supabase.</p>
+          <p className="page-text">Emissao e acompanhamento de NF por pedido.</p>
         </div>
       </div>
 
@@ -314,10 +461,120 @@ export function NotaFiscalPage() {
               onChange={(e) => setSettings((s) => ({ ...s, provider_name: e.target.value }))}
             />
           </label>
+          <label className="field">
+            <span>URL base provedor</span>
+            <input
+              value={settings.provider_base_url}
+              onChange={(e) => setSettings((s) => ({ ...s, provider_base_url: e.target.value }))}
+              placeholder="https://api.nuvemfiscal.com.br"
+            />
+          </label>
+          <label className="field">
+            <span>CNPJ</span>
+            <input value={settings.cnpj} onChange={(e) => setSettings((s) => ({ ...s, cnpj: e.target.value }))} />
+          </label>
+          <label className="field">
+            <span>IE</span>
+            <input value={settings.ie} onChange={(e) => setSettings((s) => ({ ...s, ie: e.target.value }))} />
+          </label>
+          <label className="field">
+            <span>Razao social</span>
+            <input
+              value={settings.razao_social}
+              onChange={(e) => setSettings((s) => ({ ...s, razao_social: e.target.value }))}
+            />
+          </label>
+          <label className="field">
+            <span>Nome fantasia</span>
+            <input
+              value={settings.nome_fantasia}
+              onChange={(e) => setSettings((s) => ({ ...s, nome_fantasia: e.target.value }))}
+            />
+          </label>
+          <label className="field">
+            <span>Regime tributario</span>
+            <select
+              value={settings.regime_tributario}
+              onChange={(e) => setSettings((s) => ({ ...s, regime_tributario: e.target.value }))}
+            >
+              <option value="simples_nacional">Simples Nacional</option>
+              <option value="lucro_presumido">Lucro Presumido</option>
+              <option value="lucro_real">Lucro Real</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Email fiscal</span>
+            <input
+              value={settings.email_fiscal}
+              onChange={(e) => setSettings((s) => ({ ...s, email_fiscal: e.target.value }))}
+            />
+          </label>
+          <label className="field">
+            <span>Telefone</span>
+            <input
+              value={settings.telefone_fiscal}
+              onChange={(e) => setSettings((s) => ({ ...s, telefone_fiscal: e.target.value }))}
+            />
+          </label>
+          <label className="field">
+            <span>CEP</span>
+            <input value={settings.cep} onChange={(e) => setSettings((s) => ({ ...s, cep: e.target.value }))} />
+          </label>
+          <label className="field">
+            <span>Logradouro</span>
+            <input
+              value={settings.logradouro}
+              onChange={(e) => setSettings((s) => ({ ...s, logradouro: e.target.value }))}
+            />
+          </label>
+          <label className="field">
+            <span>Numero</span>
+            <input value={settings.numero} onChange={(e) => setSettings((s) => ({ ...s, numero: e.target.value }))} />
+          </label>
+          <label className="field">
+            <span>Complemento</span>
+            <input
+              value={settings.complemento}
+              onChange={(e) => setSettings((s) => ({ ...s, complemento: e.target.value }))}
+            />
+          </label>
+          <label className="field">
+            <span>Bairro</span>
+            <input value={settings.bairro} onChange={(e) => setSettings((s) => ({ ...s, bairro: e.target.value }))} />
+          </label>
+          <label className="field">
+            <span>Cidade</span>
+            <input value={settings.cidade} onChange={(e) => setSettings((s) => ({ ...s, cidade: e.target.value }))} />
+          </label>
+          <label className="field">
+            <span>UF</span>
+            <input value={settings.uf} maxLength={2} onChange={(e) => setSettings((s) => ({ ...s, uf: e.target.value.toUpperCase() }))} />
+          </label>
+          <label className="field">
+            <span>Referencia certificado (provedor)</span>
+            <input
+              value={settings.certificate_provider_ref}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, certificate_provider_ref: e.target.value }))
+              }
+              placeholder="ID/alias do certificado A1 no provedor"
+            />
+          </label>
         </div>
         <div className="actions-row">
           <button type="button" className="primary-btn" onClick={saveSettings}>
             Salvar configuracoes
+          </button>
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => {
+              const pending = docs.filter((d) => String(d.status || "").toLowerCase().includes("pending"));
+              void Promise.all(pending.map((d) => refreshDocStatus(d)));
+            }}
+            disabled={docs.length === 0}
+          >
+            Atualizar NF pendentes
           </button>
         </div>
       </div>
@@ -341,6 +598,7 @@ export function NotaFiscalPage() {
                 <th>Titulo</th>
                 <th>Valor</th>
                 <th>Status NF</th>
+                <th>XML/PDF</th>
                 <th>Chave</th>
                 <th>Acao</th>
               </tr>
@@ -358,16 +616,44 @@ export function NotaFiscalPage() {
                       {statusLabel(doc?.status)}
                     </span>
                   </td>
+                  <td>
+                    <div className="materials-actions-cell">
+                      {doc?.xml_url ? (
+                        <a className="ghost-link" href={doc.xml_url} target="_blank" rel="noreferrer">
+                          XML
+                        </a>
+                      ) : (
+                        <span>-</span>
+                      )}
+                      {doc?.pdf_url ? (
+                        <a className="ghost-link" href={doc.pdf_url} target="_blank" rel="noreferrer">
+                          PDF
+                        </a>
+                      ) : null}
+                    </div>
+                  </td>
                   <td>{doc?.access_key || "-"}</td>
                   <td>
-                    <button
-                      type="button"
-                      className="ghost-btn"
-                      disabled={issuingOrderId === order.id}
-                      onClick={() => void emitNf(order)}
-                    >
-                      {issuingOrderId === order.id ? "Emitindo..." : "Emitir NF"}
-                    </button>
+                    <div className="materials-actions-cell">
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        disabled={issuingOrderId === order.id}
+                        onClick={() => void emitNf(order)}
+                      >
+                        {issuingOrderId === order.id ? "Emitindo..." : "Emitir NF"}
+                      </button>
+                      {doc?.provider_ref ? (
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          disabled={refreshingDocId === doc.id}
+                          onClick={() => void refreshDocStatus(doc)}
+                        >
+                          {refreshingDocId === doc.id ? "Atualizando..." : "Status"}
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -378,4 +664,3 @@ export function NotaFiscalPage() {
     </section>
   );
 }
-

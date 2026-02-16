@@ -10,6 +10,8 @@ import { MercadoLivrePage } from "./modules/MercadoLivrePage";
 import { TesteImpressaoPage } from "./modules/TesteImpressaoPage";
 import { NotaFiscalPage } from "./modules/NotaFiscalPage";
 
+const isLocalNfEnabled = Boolean((import.meta as any)?.env?.DEV);
+
 export function App() {
   return (
     <AuthGate>
@@ -22,7 +24,7 @@ export function App() {
             <Route path="calendario" element={<CalendarPage />} />
             <Route path="produtos" element={<ProductsPage />} />
             <Route path="mercado-livre" element={<MercadoLivrePage />} />
-            <Route path="nota-fiscal" element={<NotaFiscalPage />} />
+            {isLocalNfEnabled && <Route path="nota-fiscal" element={<NotaFiscalPage />} />}
             <Route path="teste-impressao" element={<TesteImpressaoPage />} />
             <Route path="configuracoes" element={<SettingsPage />} />
           </Route>

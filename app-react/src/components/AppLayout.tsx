@@ -7,15 +7,7 @@ type BaseNavItem = {
   path: string;
 };
 
-const navItems: BaseNavItem[] = [
-  { id: "mercado_livre", label: "Mercado Livre", path: "/mercado-livre" },
-  { id: "nota_fiscal", label: "Nota Fiscal", path: "/nota-fiscal" },
-  { id: "precificacao", label: "Precificacao", path: "/precificacao" },
-  { id: "calendario", label: "Calendario", path: "/calendario" },
-  { id: "produtos", label: "Meus Produtos", path: "/produtos" },
-  { id: "teste_impressao", label: "Teste de Impressao", path: "/teste-impressao" },
-  { id: "configuracoes", label: "Configuracoes", path: "/configuracoes" }
-];
+const isLocalNfEnabled = Boolean((import.meta as any)?.env?.DEV);
 
 function NavIcon({ id }: { id: string }) {
   const props = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.9" } as const;
@@ -85,6 +77,15 @@ function NavIcon({ id }: { id: string }) {
 
 export function AppLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const navItems: BaseNavItem[] = [
+    { id: "mercado_livre", label: "Mercado Livre", path: "/mercado-livre" },
+    ...(isLocalNfEnabled ? [{ id: "nota_fiscal", label: "Nota Fiscal", path: "/nota-fiscal" }] : []),
+    { id: "precificacao", label: "Precificacao", path: "/precificacao" },
+    { id: "calendario", label: "Calendario", path: "/calendario" },
+    { id: "produtos", label: "Meus Produtos", path: "/produtos" },
+    { id: "teste_impressao", label: "Teste de Impressao", path: "/teste-impressao" },
+    { id: "configuracoes", label: "Configuracoes", path: "/configuracoes" }
+  ];
 
   function closeMenu() {
     setMenuOpen(false);
