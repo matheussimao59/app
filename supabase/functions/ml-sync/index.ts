@@ -188,6 +188,7 @@ serve(async (req) => {
       new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const toDate = String(payload?.to_date || "").trim();
     const includePaymentsDetails = Boolean(payload?.include_payments_details);
+    const requestedMaxPages = Number(payload?.max_pages) || 0;
 
     if (!accessToken) {
       return jsonResponse({ error: "missing_access_token" }, 400);
@@ -207,7 +208,7 @@ serve(async (req) => {
     const allOrders: unknown[] = [];
     const limit = 50;
     let offset = 0;
-    const maxPages = 10;
+    const maxPages = Math.max(1, Math.min(100, requestedMaxPages || 60));
 
     for (let page = 0; page < maxPages; page += 1) {
       const query = new URLSearchParams({

@@ -2,7 +2,7 @@
 
 type BcsPreset = {
   id: string;
-  brightness: number;
+  density: number;
   contrast: number;
   saturation: number;
 };
@@ -84,7 +84,7 @@ function analyzeImageData(data: Uint8ClampedArray): ImageStats {
 }
 
 function calcTargetFromImage(base: ImageStats) {
-  const brightness = clamp(Math.round((0.5 - base.meanLuma) * 60), -20, 20);
+  const density = clamp(Math.round((0.5 - base.meanLuma) * 60), -20, 20);
 
   let contrast = 0;
   if (base.stdLuma < 0.18) contrast = clamp(Math.round((0.18 - base.stdLuma) * 120), -20, 20);
@@ -94,10 +94,10 @@ function calcTargetFromImage(base: ImageStats) {
   if (base.meanSat < 0.25) saturation = clamp(Math.round((0.25 - base.meanSat) * 90), -20, 20);
   if (base.meanSat > 0.55) saturation = clamp(-Math.round((base.meanSat - 0.55) * 80), -20, 20);
 
-  return { brightness, contrast, saturation };
+  return { density, contrast, saturation };
 }
 
-function buildPresets(target: { brightness: number; contrast: number; saturation: number }): BcsPreset[] {
+function buildPresets(target: { density: number; contrast: number; saturation: number }): BcsPreset[] {
   const offsets = [-10, -5, 0, 5, 10];
   const list: BcsPreset[] = [];
 
@@ -107,7 +107,7 @@ function buildPresets(target: { brightness: number; contrast: number; saturation
       const so = Math.round((bo + co) / 2);
       list.push({
         id: `p${idx}`,
-        brightness: clamp(target.brightness + bo, -20, 20),
+        density: clamp(target.density + bo, -20, 20),
         contrast: clamp(target.contrast + co, -20, 20),
         saturation: clamp(target.saturation + so, -20, 20)
       });
@@ -115,14 +115,14 @@ function buildPresets(target: { brightness: number; contrast: number; saturation
     }
   }
 
-  const hasNeutral = list.some((p) => p.brightness === 0 && p.contrast === 0 && p.saturation === 0);
+  const hasNeutral = list.some((p) => p.density === 0 && p.contrast === 0 && p.saturation === 0);
   if (!hasNeutral) {
-    list[12] = { id: list[12].id, brightness: 0, contrast: 0, saturation: 0 };
+    list[12] = { id: list[12].id, density: 0, contrast: 0, saturation: 0 };
   }
 
   const dedup = new Map<string, BcsPreset>();
   for (const p of list) {
-    const key = `${p.brightness}|${p.contrast}|${p.saturation}`;
+    const key = `${p.density}|${p.contrast}|${p.saturation}`;
     if (!dedup.has(key)) dedup.set(key, p);
   }
 
@@ -130,7 +130,7 @@ function buildPresets(target: { brightness: number; contrast: number; saturation
   while (unique.length < 25) {
     unique.push({
       id: `px${unique.length + 1}`,
-      brightness: 0,
+      density: 0,
       contrast: 0,
       saturation: 0
     });
@@ -151,7 +151,7 @@ function renderPreset(image: HTMLImageElement, preset: BcsPreset): { dataUrl: st
     };
   }
 
-  const b = 100 + preset.brightness;
+  const b = 100 + preset.density;
   const c = 100 + preset.contrast;
   const s = 100 + preset.saturation;
 
@@ -171,7 +171,7 @@ function scorePreset(base: ImageStats, preset: BcsPreset, candidate: ImageStats)
   const contrastDiff = Math.abs(candidate.stdLuma - base.stdLuma);
   const satDiff = Math.abs(candidate.meanSat - base.meanSat);
   const clipPenalty = candidate.clipRatio * 3;
-  const deltaPenalty = (Math.abs(preset.brightness) + Math.abs(preset.contrast) + Math.abs(preset.saturation)) / 120;
+  const deltaPenalty = (Math.abs(preset.density) + Math.abs(preset.contrast) + Math.abs(preset.saturation)) / 120;
 
   return lumaDiff * 2.2 + contrastDiff * 1.8 + satDiff * 1.4 + clipPenalty + deltaPenalty * 0.8;
 }
@@ -181,7 +181,7 @@ function formatSigned(value: number) {
 }
 
 function formatPresetLabel(preset: BcsPreset) {
-  return `B ${formatSigned(preset.brightness)} | C ${formatSigned(preset.contrast)} | S ${formatSigned(preset.saturation)}`;
+  return `D ${formatSigned(preset.density)} | C ${formatSigned(preset.contrast)} | S ${formatSigned(preset.saturation)}`;
 }
 
 function openPrintPdf(rows: RenderedPreset[]) {
@@ -240,7 +240,7 @@ function openPrintPdf(rows: RenderedPreset[]) {
       <body>
         <header class="head">
           <h1>Teste de Impressao - Epson WF-C5390</h1>
-          <p>Ajustes no intervalo Epson: -20 ate +20 em brilho, contraste e saturacao.</p>
+          <p>Ajustes no intervalo Epson: -20 ate +20 em densidade, contraste e saturacao.</p>
         </header>
         <section class="grid">${tiles}</section>
         <script>window.onload = () => window.print();</script>
@@ -310,7 +310,7 @@ export function TesteImpressaoPage() {
         setRendered(rows);
         setRecommended(rows.slice(0, 3));
         setStatus(
-          `Analise concluida. Ajuste sugerido alvo: B ${formatSigned(target.brightness)} | C ${formatSigned(target.contrast)} | S ${formatSigned(target.saturation)}.`
+          `Analise concluida. Ajuste sugerido alvo: D ${formatSigned(target.density)} | C ${formatSigned(target.contrast)} | S ${formatSigned(target.saturation)}.`
         );
       } catch (error) {
         if (!active) return;
@@ -333,9 +333,9 @@ export function TesteImpressaoPage() {
       <div className="print-test-head">
         <div>
           <p className="eyebrow">Epson WF-C5390</p>
-          <h2>Teste de Impressao</h2>
+          <h2>Padrao de Ajuste de Cor</h2>
           <p className="page-text">
-            Ajustes limitados ao padrao da impressora: brilho, contraste e saturacao de -20 ate +20.
+            Ajustes limitados ao padrao da impressora: densidade, contraste e saturacao de -20 ate +20.
           </p>
         </div>
         <div className="print-test-actions">
@@ -349,9 +349,19 @@ export function TesteImpressaoPage() {
             disabled={!rendered.length}
             onClick={() => openPrintPdf(rendered)}
           >
-            Gerar PDF de impressao
+            Imprimir padrao de ajuste (PDF)
           </button>
         </div>
+      </div>
+
+      <div className="print-driver-guide">
+        <p className="print-driver-guide-title">Como aplicar no driver Epson WF-C5390</p>
+        <ol>
+          <li>Abrir Preferencias de Impressao da WF-C5390.</li>
+          <li>Qualidade: Alta e tipo de papel correto.</li>
+          <li>Cor: Ajuste manual (Densidade, Contraste e Saturacao).</li>
+          <li>Imprimir este padrao, escolher o melhor bloco e salvar preset.</li>
+        </ol>
       </div>
 
       {status && <p className="page-text">{status}</p>}
@@ -380,8 +390,8 @@ export function TesteImpressaoPage() {
 
       {rendered.length > 0 && (
         <div className="print-grid">
-          {rendered.map((row) => (
-            <article key={row.id} className="print-tile">
+          {rendered.map((row, index) => (
+            <article key={row.id} className={index === 0 ? "print-tile best" : "print-tile"}>
               <img src={row.dataUrl} alt={formatPresetLabel(row)} loading="lazy" />
               <p>{formatPresetLabel(row)}</p>
             </article>

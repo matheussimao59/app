@@ -87,6 +87,18 @@ type OrderLine = {
   status: string;
 };
 
+type AlertItem = {
+  level: "high" | "medium" | "low";
+  title: string;
+  detail: string;
+  action?: {
+    label: string;
+    filter: OrderQuickFilter;
+  };
+};
+
+type OrderQuickFilter = "all" | "without_cost" | "high_fee" | "negative_profit";
+
 type SavedProduct = {
   id: string | number;
   product_name: string | null;
@@ -141,6 +153,38 @@ function fmtMoney(value: number) {
     style: "currency",
     currency: "BRL"
   });
+}
+
+function fmtPercent(value: number) {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(2).replace(".", ",")}%`;
+}
+
+function friendlySyncError(message?: string | null) {
+  const raw = String(message || "").trim();
+  if (!raw) return "";
+  const lower = raw.toLowerCase();
+
+  if (lower.includes("timeout_sync")) {
+    return "Sincronizacao demorou mais do que o esperado. Tente novamente em alguns segundos.";
+  }
+  if (lower.includes("functionsfetcherror") || lower.includes("failed to send a request to the edge function")) {
+    return "Nao foi possivel comunicar com o servidor de sincronizacao. Verifique se a internet esta estavel e tente novamente.";
+  }
+  if (lower.includes("oauth") || lower.includes("token")) {
+    return "Falha na conexao com a conta Mercado Livre. Clique em Conectar conta e autorize novamente.";
+  }
+  if (lower.includes("nao autenticado") || lower.includes("usuario")) {
+    return "Sua sessao expirou. Entre novamente para continuar.";
+  }
+  if (lower.includes("supabase")) {
+    return "Configuracao do sistema incompleta para sincronizacao.";
+  }
+  if (lower.includes("permissoes")) {
+    return "Permissao insuficiente para sincronizar dados da conta.";
+  }
+
+  return "Nao foi possivel sincronizar agora. Tente novamente em instantes.";
 }
 
 function fmtDate(value?: string) {
@@ -442,8 +486,10 @@ export function MercadoLivrePage() {
   const [costLinks, setCostLinks] = useState<CostLinks>({});
   const [savingLinkKey, setSavingLinkKey] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [orderQuickFilter, setOrderQuickFilter] = useState<OrderQuickFilter>("all");
   const handledOauthCodeRef = useRef<string | null>(null);
   const syncRunningRef = useRef(false);
+  const ordersTableRef = useRef<HTMLDivElement | null>(null);
 
   const viteEnv = ((import.meta as any)?.env || {}) as Record<string, string | undefined>;
   const fallbackMlClientId = "3165979914917791";
@@ -628,16 +674,33 @@ export function MercadoLivrePage() {
     });
   }, [dashboard.lines, savedProducts, costLinks, productsById]);
 
+  const filteredLines = useMemo(() => {
+    if (orderQuickFilter === "without_cost") {
+      return linesWithCost.filter((row) => !row.linkedProductId);
+    }
+    if (orderQuickFilter === "high_fee") {
+      return linesWithCost.filter((row) => row.amount > 0 && row.fee / row.amount >= 0.28);
+    }
+    if (orderQuickFilter === "negative_profit") {
+      return linesWithCost.filter((row) => row.netProfit < 0);
+    }
+    return linesWithCost;
+  }, [linesWithCost, orderQuickFilter]);
+
   const pageSize = 20;
-  const totalPages = Math.max(1, Math.ceil(linesWithCost.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(filteredLines.length / pageSize));
   const pagedLines = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
-    return linesWithCost.slice(start, start + pageSize);
-  }, [linesWithCost, currentPage]);
+    return filteredLines.slice(start, start + pageSize);
+  }, [filteredLines, currentPage]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [rangeDays, orders.length]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [orderQuickFilter]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -655,6 +718,133 @@ export function MercadoLivrePage() {
   const realAvgProfit = useMemo(() => {
     return dashboard.stats.ordersCount > 0 ? realProfitTotal / dashboard.stats.ordersCount : 0;
   }, [dashboard.stats.ordersCount, realProfitTotal]);
+
+  const profitMarginPct = useMemo(() => {
+    if (dashboard.stats.grossRevenue <= 0) return 0;
+    return (realProfitTotal / dashboard.stats.grossRevenue) * 100;
+  }, [dashboard.stats.grossRevenue, realProfitTotal]);
+
+  const profitAnalysis = useMemo(() => {
+    if (dashboard.stats.grossRevenue <= 0) {
+      return "Sem vendas no periodo para analisar margem.";
+    }
+    if (profitMarginPct < 0) {
+      return "Margem negativa: operacao no prejuizo.";
+    }
+    if (profitMarginPct < 8) {
+      return "Margem baixa: revisar custo e precificacao.";
+    }
+    if (profitMarginPct < 18) {
+      return "Margem positiva, mas com ponto de atencao.";
+    }
+    return "Margem saudavel no periodo.";
+  }, [dashboard.stats.grossRevenue, profitMarginPct]);
+
+  const profitTone = useMemo(() => {
+    if (dashboard.stats.grossRevenue <= 0) return "neutral";
+    if (profitMarginPct < 0) return "negative";
+    if (profitMarginPct < 8) return "warning";
+    return "positive";
+  }, [dashboard.stats.grossRevenue, profitMarginPct]);
+
+  const alerts = useMemo(() => {
+    const list: AlertItem[] = [];
+    const validSales = linesWithCost.filter((row) => !String(row.status || "").toLowerCase().includes("cancel"));
+    const salesCount = validSales.length;
+    const withoutCost = validSales.filter((row) => !row.linkedProductId).length;
+    const highFeeOrders = validSales.filter((row) => row.amount > 0 && row.fee / row.amount >= 0.28).length;
+    const feeRatio = dashboard.stats.grossRevenue > 0 ? (dashboard.stats.feesEstimated / dashboard.stats.grossRevenue) * 100 : 0;
+
+    if (dashboard.stats.grossRevenue <= 0) {
+      list.push({
+        level: "low",
+        title: "Sem vendas no periodo",
+        detail: "Nao ha pedidos pagos no intervalo selecionado."
+      });
+    }
+
+    if (profitMarginPct < 0) {
+      list.push({
+        level: "high",
+        title: "Margem negativa",
+        detail: `Lucro em prejuizo (${fmtPercent(profitMarginPct)}). Revise custos e tarifa aplicada.`,
+        action: {
+          label: "Ver pedidos com prejuizo",
+          filter: "negative_profit"
+        }
+      });
+    } else if (profitMarginPct < 8 && dashboard.stats.grossRevenue > 0) {
+      list.push({
+        level: "medium",
+        title: "Margem baixa",
+        detail: `Margem atual ${fmtPercent(profitMarginPct)}. Ganho apertado por venda.`,
+        action: {
+          label: "Ver menor margem",
+          filter: "negative_profit"
+        }
+      });
+    }
+
+    if (withoutCost > 0 && salesCount > 0) {
+      const percent = (withoutCost / salesCount) * 100;
+      list.push({
+        level: percent >= 35 ? "high" : "medium",
+        title: "Pedidos sem custo vinculado",
+        detail: `${withoutCost} pedido(s) sem produto/custo anexado (${fmtPercent(percent)}).`,
+        action: {
+          label: "Anexar custos agora",
+          filter: "without_cost"
+        }
+      });
+    }
+
+    if (feeRatio >= 22 && dashboard.stats.grossRevenue > 0) {
+      const healthyMargin = profitMarginPct >= 20;
+      list.push({
+        level: healthyMargin ? "low" : feeRatio >= 28 ? "high" : "medium",
+        title: healthyMargin ? "Tarifa alta com margem saudavel" : "Tarifa media elevada",
+        detail: healthyMargin
+          ? `Tarifas em ${fmtPercent(feeRatio)}, porem a margem atual (${fmtPercent(profitMarginPct)}) segue saudavel.`
+          : `Tarifas em ${fmtPercent(feeRatio)} da receita bruta no periodo, com impacto direto na margem.`,
+        action: {
+          label: "Ver pedidos com tarifa alta",
+          filter: "high_fee"
+        }
+      });
+    }
+
+    if (highFeeOrders > 0) {
+      list.push({
+        level: "low",
+        title: "Pedidos com tarifa alta",
+        detail: `${highFeeOrders} pedido(s) com tarifa acima de 28% do valor de venda.`,
+        action: {
+          label: "Filtrar tarifas altas",
+          filter: "high_fee"
+        }
+      });
+    }
+
+    return list.slice(0, 4);
+  }, [linesWithCost, dashboard.stats.grossRevenue, dashboard.stats.feesEstimated, profitMarginPct]);
+
+  const connectionStatus = useMemo(() => {
+    if (loading || backgroundSyncing) {
+      return { tone: "sync", label: "Sincronizando dados" };
+    }
+    if (syncError) {
+      return { tone: "error", label: "Falha na sincronizacao" };
+    }
+    if (accessToken && seller) {
+      return { tone: "ok", label: "Conta conectada" };
+    }
+    if (accessToken && !seller) {
+      return { tone: "sync", label: "Conectando conta" };
+    }
+    return { tone: "idle", label: "Conta desconectada" };
+  }, [loading, backgroundSyncing, syncError, accessToken, seller]);
+
+  const syncErrorFriendly = useMemo(() => friendlySyncError(syncError), [syncError]);
 
   async function saveCostLink(line: OrderLine, productId: string) {
     if (!supabase || !userId) return;
@@ -679,6 +869,21 @@ export function MercadoLivrePage() {
       setSyncError(`Nao foi possivel salvar vinculo de custo: ${error.message}`);
     }
     setSavingLinkKey(null);
+  }
+
+  function runAlertAction(filter: OrderQuickFilter) {
+    setOrderQuickFilter(filter);
+    setCurrentPage(1);
+    const message =
+      filter === "without_cost"
+        ? "Filtro aplicado: pedidos sem custo vinculado."
+        : filter === "high_fee"
+          ? "Filtro aplicado: pedidos com tarifa alta."
+          : filter === "negative_profit"
+            ? "Filtro aplicado: pedidos com lucro negativo."
+            : "Filtro removido.";
+    setSyncInfo(message);
+    ordersTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   async function syncData(token: string, days = rangeDays, silent = false) {
@@ -886,6 +1091,10 @@ export function MercadoLivrePage() {
           <p className="eyebrow">Mercado Livre</p>
           <h2>Painel de Vendas</h2>
           <p className="page-text">Layout profissional com indicadores principais para usuarios comuns.</p>
+          <div className={`ml-connection-pill ${connectionStatus.tone}`}>
+            <span>{connectionStatus.label}</span>
+            {lastSyncAt && <small>Ultima atualizacao: {fmtDate(lastSyncAt)}</small>}
+          </div>
           <div className="ml-v2-periods">
             {PERIODS.map((p) => (
               <button
@@ -918,15 +1127,25 @@ export function MercadoLivrePage() {
 
       <div className="ml-summary-head">
         <div>
-          <p className="ml-summary-label">💰 Faturamento</p>
+          <p className="ml-summary-label">
+            💰 Receita liquida
+            <span className="ml-help" title="Valor de venda menos tarifas do Mercado Livre.">?</span>
+          </p>
           <strong>{fmtMoney(dashboard.stats.netRevenue)}</strong>
-          <span className="ml-summary-sub">Liquido apos tarifas ML</span>
+          <span className="ml-summary-sub">Venda menos tarifas ML</span>
         </div>
         <div>
-          <p className="ml-summary-label">📈 Lucro estimado</p>
+          <p className="ml-summary-label">
+            📈 Lucro estimado
+            <span className="ml-help" title="Lucro estimado = venda - tarifa ML - custo do produto vinculado.">?</span>
+          </p>
           <strong className={realProfitTotal >= 0 ? "kpi-up" : "kpi-warn"}>
             {fmtMoney(realProfitTotal)}
           </strong>
+          <div className={`ml-profit-insight ${profitTone}`}>
+            <span className="ml-profit-badge">Margem {fmtPercent(profitMarginPct)}</span>
+            <span className="ml-profit-text">{profitAnalysis}</span>
+          </div>
         </div>
         <div>
           <p className="ml-summary-label">🏪 Conta</p>
@@ -972,10 +1191,41 @@ export function MercadoLivrePage() {
           <span>Estimado</span>
         </article>
         <article className="kpi-card elevated">
-          <p>💵 Receita paga</p>
+          <p>
+            💵 Receita bruta
+            <span className="ml-help" title="Soma total das vendas antes de descontar tarifas, impostos e frete.">?</span>
+          </p>
           <strong>{fmtMoney(dashboard.stats.grossRevenue)}</strong>
-          <span>Bruta (antes das tarifas)</span>
+          <span>Antes dos descontos</span>
         </article>
+      </div>
+
+      <div className="ml-alerts-board">
+        <div className="ml-alerts-head">
+          <h3>Alertas automaticos</h3>
+          <span>{alerts.length} alerta(s)</span>
+        </div>
+        {alerts.length === 0 ? (
+          <p className="page-text">Sem alertas criticos no periodo atual.</p>
+        ) : (
+          <div className="ml-alerts-grid">
+            {alerts.map((alert, idx) => (
+              <article key={`${alert.title}-${idx}`} className={`ml-alert-item ${alert.level}`}>
+                <strong>{alert.title}</strong>
+                <p>{alert.detail}</p>
+                {alert.action && (
+                  <button
+                    type="button"
+                    className="ml-alert-action-btn"
+                    onClick={() => runAlertAction(alert.action!.filter)}
+                  >
+                    {alert.action.label}
+                  </button>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="ml-ads-strip">
@@ -984,7 +1234,7 @@ export function MercadoLivrePage() {
           <strong>{fmtMoney(0)}</strong>
         </div>
         <div>
-          <p>Receita</p>
+          <p>Receita bruta</p>
           <strong>{fmtMoney(dashboard.stats.grossRevenue)}</strong>
         </div>
         <div>
@@ -1046,10 +1296,42 @@ export function MercadoLivrePage() {
         </article>
       </div>
 
-      <div className="ml-orders-table-wrap">
+      <div className="ml-orders-table-wrap" ref={ordersTableRef}>
         <div className="ml-orders-head">
           <h3>Pedidos recentes</h3>
-          <span>{linesWithCost.length} registros</span>
+          <span>
+            {filteredLines.length} de {linesWithCost.length} registros
+          </span>
+        </div>
+        <div className="ml-order-filters">
+          <button
+            type="button"
+            className={`ml-order-filter-chip ${orderQuickFilter === "all" ? "active" : ""}`}
+            onClick={() => setOrderQuickFilter("all")}
+          >
+            Todos
+          </button>
+          <button
+            type="button"
+            className={`ml-order-filter-chip ${orderQuickFilter === "without_cost" ? "active" : ""}`}
+            onClick={() => setOrderQuickFilter("without_cost")}
+          >
+            Sem custo
+          </button>
+          <button
+            type="button"
+            className={`ml-order-filter-chip ${orderQuickFilter === "high_fee" ? "active" : ""}`}
+            onClick={() => setOrderQuickFilter("high_fee")}
+          >
+            Tarifa alta
+          </button>
+          <button
+            type="button"
+            className={`ml-order-filter-chip ${orderQuickFilter === "negative_profit" ? "active" : ""}`}
+            onClick={() => setOrderQuickFilter("negative_profit")}
+          >
+            Lucro negativo
+          </button>
         </div>
         <div className="table-wrap">
           <table className="table clean">
@@ -1114,7 +1396,7 @@ export function MercadoLivrePage() {
             </tbody>
           </table>
         </div>
-        {linesWithCost.length > pageSize && (
+        {filteredLines.length > pageSize && (
           <div className="ml-pagination">
             <button
               type="button"
@@ -1141,15 +1423,26 @@ export function MercadoLivrePage() {
 
       {oauthCode && (
         <div className="soft-panel">
-          <p>Codigo OAuth detectado</p>
+          <p>Conexao em andamento</p>
           <ul>
-            <li>Conexao automatica em andamento.</li>
-            <li>Nenhuma acao manual necessaria.</li>
+            <li>Estamos finalizando a autorizacao da sua conta.</li>
+            <li>Nenhuma acao manual e necessaria agora.</li>
           </ul>
         </div>
       )}
 
-      {syncError && <p className="error-text">{syncError}</p>}
+      {!accessToken && !loading && (
+        <div className="soft-panel">
+          <p>Primeiro acesso ao Mercado Livre</p>
+          <ul>
+            <li>Clique em Conectar conta Mercado Livre.</li>
+            <li>Autorize o acesso na pagina do Mercado Livre.</li>
+            <li>A sincronizacao sera iniciada automaticamente.</li>
+          </ul>
+        </div>
+      )}
+
+      {syncError && <p className="error-text">{syncErrorFriendly}</p>}
       {syncInfo && <p className="page-text">{syncInfo}</p>}
 
       {!hasOAuthConfig && (

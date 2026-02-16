@@ -1,8 +1,15 @@
 ﻿import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
-const navItems = [
+type BaseNavItem = {
+  id: string;
+  label: string;
+  path: string;
+};
+
+const navItems: BaseNavItem[] = [
   { id: "mercado_livre", label: "Mercado Livre", path: "/mercado-livre" },
+  { id: "nota_fiscal", label: "Nota Fiscal", path: "/nota-fiscal" },
   { id: "precificacao", label: "Precificacao", path: "/precificacao" },
   { id: "calendario", label: "Calendario", path: "/calendario" },
   { id: "produtos", label: "Meus Produtos", path: "/produtos" },
@@ -12,17 +19,6 @@ const navItems = [
 
 function NavIcon({ id }: { id: string }) {
   const props = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.9" } as const;
-
-  if (id === "dashboard") {
-    return (
-      <svg {...props}>
-        <rect x="3" y="3" width="8" height="8" rx="1.4" />
-        <rect x="13" y="3" width="8" height="5" rx="1.4" />
-        <rect x="13" y="10" width="8" height="11" rx="1.4" />
-        <rect x="3" y="13" width="8" height="8" rx="1.4" />
-      </svg>
-    );
-  }
 
   if (id === "precificacao") {
     return (
@@ -56,6 +52,15 @@ function NavIcon({ id }: { id: string }) {
       <svg {...props}>
         <circle cx="12" cy="12" r="8.5" />
         <path d="M8 12h8M9 9.5l2.5 2.5L9 14.5M15 9.5L12.5 12l2.5 2.5" />
+      </svg>
+    );
+  }
+
+  if (id === "nota_fiscal") {
+    return (
+      <svg {...props}>
+        <rect x="5" y="3.5" width="14" height="17" rx="2" />
+        <path d="M8 8h8M8 12h8M8 16h5" />
       </svg>
     );
   }
