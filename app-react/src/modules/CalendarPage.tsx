@@ -38,6 +38,14 @@ type MarkerQuad = {
   bl: MarkerPoint;
 };
 
+type BatchPrintRow = {
+  orderId: string;
+  imageData: string;
+  sheets: number;
+  fitMode: "cover" | "contain" | "fill";
+  stretchX: number;
+};
+
 const CALENDAR_MOCKUP_SETTINGS_ID = "calendar_mockup_config";
 const DEFAULT_LEFT_RECT: MarkerRect = { x: 0.08, y: 0.1, width: 0.38, height: 0.38, rotation: 0 };
 const DEFAULT_RIGHT_RECT: MarkerRect = { x: 0.54, y: 0.1, width: 0.38, height: 0.38, rotation: 0 };
@@ -78,6 +86,28 @@ function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error("Falha ao carregar imagem."));
     img.src = dataUrl;
   });
+}
+
+async function analyzePrintStrategy(
+  imageData: string
+): Promise<{ fitMode: "cover" | "contain" | "fill"; stretchX: number }> {
+  const cellRatio = 5 / 4.243;
+  const MAX_SAFE_STRETCH_X = 2.35;
+  try {
+    const img = await loadImageFromDataUrl(imageData);
+    if (!img.naturalWidth || !img.naturalHeight) return { fitMode: "contain", stretchX: 1 };
+    const imgRatio = img.naturalWidth / img.naturalHeight;
+    // Regra: nao perder informacao da arte.
+    // 1) Base sempre em contain (sem corte).
+    // 2) Quando a arte for muito vertical, estica apenas lateral (X) para ocupar melhor o quadro.
+    if (imgRatio >= cellRatio) return { fitMode: "contain", stretchX: 1 };
+
+    const requiredStretch = cellRatio / Math.max(0.0001, imgRatio);
+    const stretchX = Math.min(MAX_SAFE_STRETCH_X, Math.max(1, requiredStretch));
+    return { fitMode: "contain", stretchX: Number(stretchX.toFixed(3)) };
+  } catch {
+    return { fitMode: "contain", stretchX: 1 };
+  }
 }
 
 function formatDate(value?: string) {
@@ -149,16 +179,19 @@ function rectToQuad(rect: MarkerRect): MarkerQuad {
   };
 }
 
-function openPrintGrid(orderId: string, imageData: string) {
+async function openPrintGrid(orderId: string, imageData: string) {
   const popup = window.open("", "_blank", "width=1200,height=900");
   if (!popup) return;
+  const strategy = await analyzePrintStrategy(imageData);
 
   const cells = new Array(28)
     .fill(0)
     .map(
       () => `
         <div class="cell">
-          <img src="${imageData}" alt="Arte ${orderId}" />
+          <div class="cell-inner">
+            <img src="${imageData}" alt="Arte ${orderId}" style="transform: scaleX(${strategy.stretchX});" />
+          </div>
         </div>
       `
     )
@@ -194,17 +227,39 @@ function openPrintGrid(orderId: string, imageData: string) {
             grid-template-columns: repeat(4, 5cm);
             grid-template-rows: repeat(7, 4.243cm);
             gap: 0;
+            position: relative;
           }
           .cell {
             width: 5cm;
             height: 4.243cm;
             overflow: hidden;
           }
+          .cell-inner {
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            padding: 0.08mm;
+            background: #fff;
+          }
           img {
             width: 100%;
             height: 100%;
-            object-fit: contain;
+            object-fit: ${strategy.fitMode};
             display: block;
+            transform-origin: center center;
+          }
+          .cut-lines {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 5;
+          }
+          .cut-lines i {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            height: 0;
+            border-top: 0.2mm dashed rgba(0, 0, 0, 0.7);
           }
           @media print {
             html, body, .sheet { margin: 0; padding: 0; }
@@ -213,8 +268,144 @@ function openPrintGrid(orderId: string, imageData: string) {
       </head>
       <body>
         <div class="sheet">
-          <div class="grid">${cells}</div>
+          <div class="grid">
+            ${cells}
+            <div class="cut-lines">
+              <i style="top:4.243cm"></i>
+              <i style="top:8.486cm"></i>
+              <i style="top:12.729cm"></i>
+              <i style="top:16.972cm"></i>
+              <i style="top:21.215cm"></i>
+              <i style="top:25.458cm"></i>
+            </div>
+          </div>
         </div>
+        <script>
+          window.onload = () => window.print();
+        </script>
+      </body>
+    </html>
+  `);
+  popup.document.close();
+}
+
+function openBatchPrintGrid(rows: BatchPrintRow[]) {
+  if (!rows.length) return;
+  const popup = window.open("", "_blank", "width=1200,height=900");
+  if (!popup) return;
+
+  const sheetHtml = rows
+    .flatMap((row) => {
+      const pages = new Array(Math.max(1, row.sheets)).fill(0);
+      return pages.map(
+        (_, idx) => `
+          <section class="batch-sheet">
+            <div class="grid">
+              ${new Array(28)
+                .fill(0)
+                .map(
+                  () => `
+                    <div class="cell">
+                      <div class="cell-inner">
+                        <img
+                          class="fit-${row.fitMode}"
+                          style="transform: scaleX(${row.stretchX});"
+                          src="${row.imageData}"
+                          alt="Arte ${row.orderId}"
+                        />
+                      </div>
+                    </div>
+                  `
+                )
+                .join("")}
+              <div class="cut-lines">
+                <i style="top:4.243cm"></i>
+                <i style="top:8.486cm"></i>
+                <i style="top:12.729cm"></i>
+                <i style="top:16.972cm"></i>
+                <i style="top:21.215cm"></i>
+                <i style="top:25.458cm"></i>
+              </div>
+            </div>
+          </section>
+        `
+      );
+    })
+    .join("");
+
+  popup.document.write(`
+    <!doctype html>
+    <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8" />
+        <title>Impressao em Lote</title>
+        <style>
+          @page { size: A4 portrait; margin: 0; }
+          html, body {
+            margin: 0;
+            padding: 0;
+            width: 210mm;
+            height: 297mm;
+            background: #fff;
+            font-family: Arial, sans-serif;
+          }
+          .batch-sheet {
+            width: 210mm;
+            height: 297mm;
+            page-break-after: always;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            display: flex;
+          }
+          .batch-sheet:last-child { page-break-after: auto; }
+          .grid {
+            width: 20cm;
+            height: 29.7cm;
+            display: grid;
+            grid-template-columns: repeat(4, 5cm);
+            grid-template-rows: repeat(7, 4.243cm);
+            gap: 0;
+            position: relative;
+          }
+          .cell {
+            width: 5cm;
+            height: 4.243cm;
+            overflow: hidden;
+          }
+          .cell-inner {
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            padding: 0.08mm;
+            background: #fff;
+          }
+          .cell img {
+            width: 100%;
+            height: 100%;
+            display: block;
+            transform-origin: center center;
+          }
+          .cell img.fit-cover { object-fit: cover; }
+          .cell img.fit-contain { object-fit: contain; }
+          .cell img.fit-fill { object-fit: fill; }
+          .cut-lines {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 5;
+          }
+          .cut-lines i {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            height: 0;
+            border-top: 0.2mm dashed rgba(0, 0, 0, 0.7);
+          }
+        </style>
+      </head>
+      <body>
+        ${sheetHtml}
         <script>
           window.onload = () => window.print();
         </script>
@@ -233,8 +424,10 @@ export function CalendarPage() {
   const [tab, setTab] = useState<"todo" | "printed">("todo");
 
   const [showNewModal, setShowNewModal] = useState(false);
+  const [showBatchModal, setShowBatchModal] = useState(false);
   const [orderId, setOrderId] = useState("");
   const [imageData, setImageData] = useState("");
+  const [batchPlan, setBatchPlan] = useState<Record<string, { selected: boolean; sheets: number }>>({});
 
   const [showMockupModal, setShowMockupModal] = useState(false);
   const [mockupConfig, setMockupConfig] = useState<MockupConfig>({
@@ -457,6 +650,18 @@ export function CalendarPage() {
     [items, tab]
   );
 
+  useEffect(() => {
+    const next: Record<string, { selected: boolean; sheets: number }> = {};
+    for (const item of filtered) {
+      const old = batchPlan[item.id];
+      next[item.id] = {
+        selected: old?.selected ?? false,
+        sheets: old?.sheets ?? 1
+      };
+    }
+    setBatchPlan(next);
+  }, [filtered]);
+
   async function onSelectFile(file: File | null) {
     if (!file) return;
     const dataUrl = await toDataUrl(file);
@@ -473,6 +678,54 @@ export function CalendarPage() {
       }
     } catch {}
     setMockupConfig((prev) => ({ ...prev, template_data: dataUrl }));
+  }
+
+  function toggleBatchSelect(id: string, selected: boolean) {
+    setBatchPlan((prev) => ({
+      ...prev,
+      [id]: {
+        selected,
+        sheets: Math.max(1, Number(prev[id]?.sheets || 1))
+      }
+    }));
+  }
+
+  function setBatchSheets(id: string, value: number) {
+    const sheets = Number.isNaN(value) ? 1 : Math.max(1, Math.min(999, Math.floor(value)));
+    setBatchPlan((prev) => ({
+      ...prev,
+      [id]: {
+        selected: Boolean(prev[id]?.selected),
+        sheets
+      }
+    }));
+  }
+
+  async function runBatchPrint() {
+    const selectedBase = filtered
+      .filter((item) => batchPlan[item.id]?.selected)
+      .map((item) => ({
+        orderId: item.order_id,
+        imageData: item.image_data,
+        sheets: Math.max(1, Number(batchPlan[item.id]?.sheets || 1))
+      }));
+
+    if (!selectedBase.length) {
+      setStatus("Selecione pelo menos uma arte para impressao em lote.");
+      return;
+    }
+
+    const selectedRows: BatchPrintRow[] = await Promise.all(
+      selectedBase.map(async (row) => ({
+        ...row,
+        ...(await analyzePrintStrategy(row.imageData))
+      }))
+    );
+
+    const totalSheets = selectedRows.reduce((acc, row) => acc + row.sheets, 0);
+    openBatchPrintGrid(selectedRows);
+    setShowBatchModal(false);
+    setStatus(`Lote enviado para impressao: ${selectedRows.length} arte(s), ${totalSheets} folha(s).`);
   }
 
   function toUnitPosition(clientX: number, clientY: number) {
@@ -792,6 +1045,16 @@ export function CalendarPage() {
           <p>Gerencie as artes, gere PDFs e controle o status de impressao.</p>
         </div>
         <div className="calendar-flow-header-actions">
+          <button className="calendar-btn-dark" type="button" onClick={() => setShowBatchModal(true)}>
+            <span className="calendar-btn-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <rect x="5" y="4" width="14" height="4" rx="1" />
+                <rect x="4" y="9" width="16" height="6" rx="1.5" />
+                <rect x="6" y="15" width="12" height="5" rx="1" />
+              </svg>
+            </span>
+            Impressao em lote
+          </button>
           <button className="calendar-btn-dark" type="button" onClick={() => setShowMockupModal(true)}>
             <span className="calendar-btn-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -862,7 +1125,7 @@ export function CalendarPage() {
               </button>
 
               <div className="calendar-card-actions">
-                <button className="calendar-pdf-btn" type="button" onClick={() => openPrintGrid(item.order_id, item.image_data)}>
+                <button className="calendar-pdf-btn" type="button" onClick={() => void openPrintGrid(item.order_id, item.image_data)}>
                   PDF 28x
                 </button>
                 <button className="calendar-mockup-btn" type="button" onClick={() => openMockup(item)}>
@@ -906,6 +1169,74 @@ export function CalendarPage() {
             <div className="actions-row">
               <button className="primary-btn" type="button" disabled={savingNew} onClick={createOrder}>
                 {savingNew ? "Salvando..." : "Salvar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBatchModal && (
+        <div className="modal-backdrop" onClick={() => setShowBatchModal(false)}>
+          <div className="product-modal calendar-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="product-modal-head">
+              <h3>Impressao em Lote</h3>
+              <button type="button" onClick={() => setShowBatchModal(false)}>Fechar</button>
+            </div>
+
+            <p className="page-text">
+              Selecione as artes e informe a quantidade de folhas para cada uma.
+            </p>
+
+            <div className="table-wrap">
+              <table className="table clean">
+                <thead>
+                  <tr>
+                    <th>Sel.</th>
+                    <th>Pedido</th>
+                    <th>Titulo</th>
+                    <th>Folhas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={4}>Nenhuma arte disponivel nesta aba.</td>
+                    </tr>
+                  ) : (
+                    filtered.map((item) => (
+                      <tr key={item.id}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(batchPlan[item.id]?.selected)}
+                            onChange={(e) => toggleBatchSelect(item.id, e.target.checked)}
+                          />
+                        </td>
+                        <td>#{item.order_id}</td>
+                        <td>{item.order_id}</td>
+                        <td>
+                          <input
+                            type="number"
+                            min={1}
+                            max={999}
+                            className="table-input"
+                            value={batchPlan[item.id]?.sheets ?? 1}
+                            onChange={(e) => setBatchSheets(item.id, Number(e.target.value))}
+                          />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="actions-row">
+              <button className="ghost-btn" type="button" onClick={() => setShowBatchModal(false)}>
+                Cancelar
+              </button>
+              <button className="primary-btn" type="button" onClick={() => void runBatchPrint()}>
+                Gerar e Imprimir Lote
               </button>
             </div>
           </div>
