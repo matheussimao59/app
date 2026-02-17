@@ -7,6 +7,7 @@ type CalendarOrder = {
   order_id: string;
   image_data: string;
   printed: boolean;
+  quantity?: number | null;
   printed_at?: string | null;
   created_at?: string;
 };
@@ -48,8 +49,12 @@ type BatchPrintRow = {
 };
 
 const CALENDAR_MOCKUP_SETTINGS_ID = "calendar_mockup_config";
+const CALENDAR_UNITS_PER_SHEET = 28;
 const DEFAULT_LEFT_RECT: MarkerRect = { x: 0.08, y: 0.1, width: 0.38, height: 0.38, rotation: 0 };
 const DEFAULT_RIGHT_RECT: MarkerRect = { x: 0.54, y: 0.1, width: 0.38, height: 0.38, rotation: 0 };
+function calendarQuantityOverridesSettingId(userId: string) {
+  return `calendar_quantity_overrides_${userId}`;
+}
 
 type ResizeDragState = {
   side: "left" | "right";
@@ -114,6 +119,11 @@ async function analyzePrintStrategy(
 function formatDate(value?: string) {
   if (!value) return "Sem data";
   return new Date(value).toLocaleDateString("pt-BR");
+}
+
+function calcSheetsByQuantity(quantity?: number | null) {
+  const qty = Math.max(1, Number(quantity) || 1);
+  return Math.max(1, Math.ceil(qty / CALENDAR_UNITS_PER_SHEET));
 }
 
 function clampUnit(value: number) {
@@ -418,6 +428,8 @@ function openBatchPrintGrid(rows: BatchPrintRow[]) {
 
 export function CalendarPage() {
   const [items, setItems] = useState<CalendarOrder[]>([]);
+  const [calendarUserId, setCalendarUserId] = useState<string | null>(null);
+  const [quantityOverrides, setQuantityOverrides] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [savingNew, setSavingNew] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -425,9 +437,16 @@ export function CalendarPage() {
   const [tab, setTab] = useState<"todo" | "printed">("todo");
 
   const [showNewModal, setShowNewModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [orderId, setOrderId] = useState("");
+  const [quantity, setQuantity] = useState(1);
   const [imageData, setImageData] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editOrderId, setEditOrderId] = useState("");
+  const [editQuantity, setEditQuantity] = useState(1);
+  const [editImageData, setEditImageData] = useState("");
   const [batchPlan, setBatchPlan] = useState<Record<string, { selected: boolean; sheets: number }>>({});
 
   const [showMockupModal, setShowMockupModal] = useState(false);
@@ -478,8 +497,25 @@ export function CalendarPage() {
       setLoading(false);
       return;
     }
+    setCalendarUserId(userId);
 
     await prunePrintedOlderThanFiveDays(userId);
+
+    const { data: overridesRow } = await supabase
+      .from("app_settings")
+      .select("config_data")
+      .eq("id", calendarQuantityOverridesSettingId(userId))
+      .maybeSingle();
+    const rawById =
+      ((overridesRow?.config_data as { by_id?: Record<string, number> } | null)?.by_id || {}) as Record<
+        string,
+        number
+      >;
+    const normalizedById: Record<string, number> = {};
+    for (const key of Object.keys(rawById)) {
+      normalizedById[key] = Math.max(1, Math.floor(Number(rawById[key]) || 1));
+    }
+    setQuantityOverrides(normalizedById);
 
     setLoading(true);
     const { data, error } = await supabase
@@ -492,7 +528,13 @@ export function CalendarPage() {
       setStatus(error.message);
       setItems([]);
     } else {
-      setItems(((data || []) as CalendarOrder[]).map((item) => ({ ...item, printed: Boolean(item.printed) })));
+      setItems(
+        ((data || []) as CalendarOrder[]).map((item) => ({
+          ...item,
+          printed: Boolean(item.printed),
+          quantity: Math.max(1, Number(normalizedById[item.id] || item.quantity) || 1)
+        }))
+      );
       setStatus(null);
     }
     setLoading(false);
@@ -674,9 +716,10 @@ export function CalendarPage() {
     const next: Record<string, { selected: boolean; sheets: number }> = {};
     for (const item of filtered) {
       const old = batchPlan[item.id];
+      const autoSheets = calcSheetsByQuantity(item.quantity);
       next[item.id] = {
         selected: old?.selected ?? false,
-        sheets: old?.sheets ?? 1
+        sheets: old?.sheets ?? autoSheets
       };
     }
     setBatchPlan(next);
@@ -686,6 +729,12 @@ export function CalendarPage() {
     if (!file) return;
     const dataUrl = await toDataUrl(file);
     setImageData(dataUrl);
+  }
+
+  async function onSelectEditFile(file: File | null) {
+    if (!file) return;
+    const dataUrl = await toDataUrl(file);
+    setEditImageData(dataUrl);
   }
 
   async function onSelectMockupTemplate(file: File | null) {
@@ -721,6 +770,35 @@ export function CalendarPage() {
     }));
   }
 
+  function toggleBatchSelectAll(selected: boolean) {
+    setBatchPlan((prev) => {
+      const next = { ...prev };
+      for (const item of filtered) {
+        const autoSheets = calcSheetsByQuantity(item.quantity);
+        next[item.id] = {
+          selected,
+          sheets: Math.max(1, Number(next[item.id]?.sheets || autoSheets))
+        };
+      }
+      return next;
+    });
+  }
+
+  function applyAutoSheetsForSelected() {
+    setBatchPlan((prev) => {
+      const next = { ...prev };
+      for (const item of filtered) {
+        if (!next[item.id]?.selected) continue;
+        next[item.id] = {
+          selected: true,
+          sheets: calcSheetsByQuantity(item.quantity)
+        };
+      }
+      return next;
+    });
+    setStatus(`Folhas recalculadas automaticamente (${CALENDAR_UNITS_PER_SHEET} unidades por folha).`);
+  }
+
   async function runBatchPrint() {
     const selectedBase = filtered
       .filter((item) => batchPlan[item.id]?.selected)
@@ -747,6 +825,28 @@ export function CalendarPage() {
     setShowBatchModal(false);
     setStatus(`Lote enviado para impressao: ${selectedRows.length} arte(s), ${totalSheets} folha(s).`);
   }
+
+  const selectedCount = useMemo(
+    () => filtered.filter((item) => batchPlan[item.id]?.selected).length,
+    [filtered, batchPlan]
+  );
+  const allSelected = filtered.length > 0 && selectedCount === filtered.length;
+  const selectedUnitsTotal = useMemo(
+    () =>
+      filtered.reduce((acc, item) => {
+        if (!batchPlan[item.id]?.selected) return acc;
+        return acc + Math.max(1, Number(item.quantity) || 1);
+      }, 0),
+    [filtered, batchPlan]
+  );
+  const selectedSheetsTotal = useMemo(
+    () =>
+      filtered.reduce((acc, item) => {
+        if (!batchPlan[item.id]?.selected) return acc;
+        return acc + Math.max(1, Number(batchPlan[item.id]?.sheets || 1));
+      }, 0),
+    [filtered, batchPlan]
+  );
 
   function toUnitPosition(clientX: number, clientY: number) {
     const el = markerSurfaceRef.current;
@@ -873,6 +973,7 @@ export function CalendarPage() {
       setStatus("Selecione a imagem da arte.");
       return;
     }
+    const qty = Math.max(1, Math.min(999, Math.floor(Number(quantity) || 1)));
 
     const { data: authData } = await supabase.auth.getUser();
     const userId = authData.user?.id;
@@ -882,12 +983,42 @@ export function CalendarPage() {
     }
 
     setSavingNew(true);
-    const { error } = await supabase.from("calendar_orders").insert({
+    const payload = {
       user_id: userId,
       order_id: orderId.trim(),
       image_data: imageData,
-      printed: false
-    });
+      printed: false,
+      quantity: qty
+    };
+    let insertedId = "";
+    let { data: insertedData, error } = await supabase
+      .from("calendar_orders")
+      .insert(payload)
+      .select("id")
+      .single();
+    insertedId = String((insertedData as { id?: string } | null)?.id || "");
+    if (error && error.message.toLowerCase().includes("quantity")) {
+      const fallback = await supabase
+        .from("calendar_orders")
+        .insert({
+          user_id: userId,
+          order_id: orderId.trim(),
+          image_data: imageData,
+          printed: false
+        })
+        .select("id")
+        .single();
+      insertedId = String((fallback.data as { id?: string } | null)?.id || "");
+      error = fallback.error;
+      if (!error && insertedId) {
+        const next = { ...quantityOverrides, [insertedId]: qty };
+        setQuantityOverrides(next);
+        await supabase.from("app_settings").upsert({
+          id: calendarQuantityOverridesSettingId(userId),
+          config_data: { by_id: next }
+        });
+      }
+    }
 
     if (error) {
       setStatus(error.message);
@@ -896,10 +1027,81 @@ export function CalendarPage() {
     }
 
     setOrderId("");
+    setQuantity(1);
     setImageData("");
     setShowNewModal(false);
     setStatus("Calendario criado com sucesso.");
     setSavingNew(false);
+    await loadOrders();
+  }
+
+  function openEditModal(item: CalendarOrder) {
+    setEditingItemId(item.id);
+    setEditOrderId(item.order_id);
+    setEditQuantity(Math.max(1, Number(item.quantity) || 1));
+    setEditImageData(item.image_data);
+    setShowEditModal(true);
+  }
+
+  async function saveEditOrder() {
+    if (!supabase || !editingItemId) return;
+    if (!editOrderId.trim()) {
+      setStatus("Informe o ID do calendario.");
+      return;
+    }
+    if (!editImageData) {
+      setStatus("Selecione a imagem da arte.");
+      return;
+    }
+    const qty = Math.max(1, Math.min(999, Math.floor(Number(editQuantity) || 1)));
+    setSavingEdit(true);
+
+    let { error } = await supabase
+      .from("calendar_orders")
+      .update({
+        order_id: editOrderId.trim(),
+        image_data: editImageData,
+        quantity: qty
+      })
+      .eq("id", editingItemId);
+
+    if (error && error.message.toLowerCase().includes("quantity")) {
+      const fallback = await supabase
+        .from("calendar_orders")
+        .update({
+          order_id: editOrderId.trim(),
+          image_data: editImageData
+        })
+        .eq("id", editingItemId);
+      error = fallback.error;
+      if (!error && calendarUserId) {
+        const next = { ...quantityOverrides, [editingItemId]: qty };
+        setQuantityOverrides(next);
+        await supabase.from("app_settings").upsert({
+          id: calendarQuantityOverridesSettingId(calendarUserId),
+          config_data: { by_id: next }
+        });
+      }
+    } else if (!error && calendarUserId && quantityOverrides[editingItemId]) {
+      const next = { ...quantityOverrides };
+      delete next[editingItemId];
+      setQuantityOverrides(next);
+      await supabase.from("app_settings").upsert({
+        id: calendarQuantityOverridesSettingId(calendarUserId),
+        config_data: { by_id: next }
+      });
+    }
+
+    if (error) {
+      setStatus(error.message);
+      setSavingEdit(false);
+      return;
+    }
+
+    setSavingEdit(false);
+    setShowEditModal(false);
+    setEditingItemId(null);
+    setStatus("Calendario atualizado com sucesso.");
     await loadOrders();
   }
 
@@ -1151,7 +1353,7 @@ export function CalendarPage() {
             <article key={item.id} className="calendar-card">
               <div className="calendar-card-head">
                 <strong>ID: #{item.order_id}</strong>
-                <span>{formatDate(item.created_at)}</span>
+                <span>{formatDate(item.created_at)} • Qtd: {Math.max(1, Number(item.quantity) || 1)}</span>
               </div>
 
               <div className="calendar-thumb-wrap">
@@ -1173,6 +1375,9 @@ export function CalendarPage() {
                 </button>
                 <button className="calendar-mockup-btn" type="button" onClick={() => openMockup(item)}>
                   Mockup
+                </button>
+                <button className="calendar-mockup-btn" type="button" onClick={() => openEditModal(item)}>
+                  Editar
                 </button>
               </div>
 
@@ -1198,6 +1403,19 @@ export function CalendarPage() {
                 <input value={orderId} onChange={(e) => setOrderId(e.target.value)} placeholder="Ex: ff" />
               </label>
               <label className="field">
+                <span>Quantidade</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={999}
+                  value={quantity}
+                  onChange={(e) => setQuantity(Math.max(1, Math.min(999, Math.floor(Number(e.target.value) || 1))))}
+                />
+              </label>
+            </div>
+
+            <div className="form-grid two-col">
+              <label className="field">
                 <span>Imagem</span>
                 <input type="file" accept="image/*" onChange={(e) => onSelectFile(e.target.files?.[0] || null)} />
               </label>
@@ -1218,6 +1436,55 @@ export function CalendarPage() {
         </div>
       )}
 
+      {showEditModal && (
+        <div className="modal-backdrop" onClick={() => setShowEditModal(false)}>
+          <div className="product-modal calendar-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="product-modal-head">
+              <h3>Editar Calendario</h3>
+              <button type="button" onClick={() => setShowEditModal(false)}>Fechar</button>
+            </div>
+
+            <div className="form-grid two-col">
+              <label className="field">
+                <span>ID</span>
+                <input value={editOrderId} onChange={(e) => setEditOrderId(e.target.value)} placeholder="Ex: ff" />
+              </label>
+              <label className="field">
+                <span>Quantidade</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={999}
+                  value={editQuantity}
+                  onChange={(e) =>
+                    setEditQuantity(Math.max(1, Math.min(999, Math.floor(Number(e.target.value) || 1))))
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="form-grid two-col">
+              <label className="field">
+                <span>Imagem</span>
+                <input type="file" accept="image/*" onChange={(e) => onSelectEditFile(e.target.files?.[0] || null)} />
+              </label>
+            </div>
+
+            {editImageData && (
+              <div className="calendar-modal-preview">
+                <img src={editImageData} alt="Preview edicao arte" />
+              </div>
+            )}
+
+            <div className="actions-row">
+              <button className="primary-btn" type="button" disabled={savingEdit} onClick={saveEditOrder}>
+                {savingEdit ? "Salvando..." : "Salvar alteracoes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showBatchModal && (
         <div className="modal-backdrop" onClick={() => setShowBatchModal(false)}>
           <div className="product-modal calendar-modal" onClick={(e) => e.stopPropagation()}>
@@ -1229,6 +1496,22 @@ export function CalendarPage() {
             <p className="page-text">
               Selecione as artes e informe a quantidade de folhas para cada uma.
             </p>
+            <div className="actions-row" style={{ justifyContent: "space-between", marginTop: 4 }}>
+              <label className="field" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={(e) => toggleBatchSelectAll(e.target.checked)}
+                />
+                <span>Selecionar todos</span>
+              </label>
+              <button className="ghost-btn" type="button" onClick={applyAutoSheetsForSelected}>
+                Auto calcular folhas ({CALENDAR_UNITS_PER_SHEET}/folha)
+              </button>
+            </div>
+            <p className="page-text">
+              Selecionados: {selectedCount} arte(s) • {selectedUnitsTotal} unidade(s) • {selectedSheetsTotal} folha(s)
+            </p>
 
             <div className="table-wrap">
               <table className="table clean">
@@ -1237,13 +1520,14 @@ export function CalendarPage() {
                     <th>Sel.</th>
                     <th>Pedido</th>
                     <th>Titulo</th>
+                    <th>Qtd</th>
                     <th>Folhas</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={4}>Nenhuma arte disponivel nesta aba.</td>
+                      <td colSpan={5}>Nenhuma arte disponivel nesta aba.</td>
                     </tr>
                   ) : (
                     filtered.map((item) => (
@@ -1257,6 +1541,7 @@ export function CalendarPage() {
                         </td>
                         <td>#{item.order_id}</td>
                         <td>{item.order_id}</td>
+                        <td>{Math.max(1, Number(item.quantity) || 1)}</td>
                         <td>
                           <input
                             type="number"
