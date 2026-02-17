@@ -988,8 +988,25 @@ export function MercadoLivrePage() {
       });
       setSyncInfo(`Mensagem de personalizacao enviada para o pedido #${row.id}.`);
     } catch (sendError) {
-      const message = sendError instanceof Error ? sendError.message : "erro_desconhecido";
-      setSyncError(`Nao foi possivel enviar mensagem de personalizacao. Detalhe tecnico: ${message}`);
+      let detail = sendError instanceof Error ? sendError.message : "erro_desconhecido";
+      const maybeContext = (sendError as { context?: { json?: () => Promise<unknown> } })?.context;
+      if (maybeContext?.json) {
+        try {
+          const payload = (await maybeContext.json()) as {
+            message?: string;
+            details?: string;
+            error?: string;
+          };
+          detail =
+            String(payload?.message || "").trim() ||
+            String(payload?.details || "").trim() ||
+            String(payload?.error || "").trim() ||
+            detail;
+        } catch {
+          // mantém detalhe original
+        }
+      }
+      setSyncError(`Nao foi possivel enviar mensagem de personalizacao. Detalhe tecnico: ${detail}`);
     } finally {
       setSendingCustomizationKey(null);
     }
