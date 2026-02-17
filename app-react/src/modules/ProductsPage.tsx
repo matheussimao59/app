@@ -1,5 +1,10 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
+import {
+  DEFAULT_ORDER_FEE_CONFIG,
+  type OrderFeeConfig,
+  loadOrderFeeConfig
+} from "../lib/orderFeeConfig";
 
 type ProductRow = {
   id: string | number;
@@ -29,11 +34,25 @@ type EditMaterial = {
   unit_cost: number;
 };
 
+type EditStrategy = {
+  id: string;
+  name: string;
+  pct: number;
+  fix: number;
+};
+
 type MaterialLibraryRow = {
   id: string;
   name: string;
   unit_cost?: number | null;
   cost_per_unit?: number | null;
+};
+
+type FeePreview = {
+  label: string;
+  percent: number;
+  fixed: number;
+  fee: number;
 };
 
 function fmt(value: number) {
@@ -67,6 +86,24 @@ function makeEditMaterial(): EditMaterial {
   return { id: crypto.randomUUID(), name: "", qty: 1, unit_cost: 0 };
 }
 
+function makeEditStrategy(): EditStrategy {
+  return { id: crypto.randomUUID(), name: "", pct: 0, fix: 0 };
+}
+
+function makeEditStrategyFromFeeOverride(item: {
+  id?: string;
+  name?: string;
+  percent?: number;
+  fixed?: number;
+}): EditStrategy {
+  return {
+    id: item.id || crypto.randomUUID(),
+    name: String(item.name || ""),
+    pct: Number(item.percent) || 0,
+    fix: Number(item.fixed) || 0
+  };
+}
+
 function normalizeKey(text?: string) {
   return String(text || "")
     .normalize("NFD")
@@ -91,6 +128,36 @@ function calcBaseCostFromJson(json: ProductJson) {
   return subtotalKit * (1 + fixedPct / 100);
 }
 
+function pickMarketplaceFee(json: ProductJson, sellingPrice: number, feeConfig: OrderFeeConfig): FeePreview {
+  const strategies = Array.isArray(json.strategies) ? json.strategies : [];
+  const mlStrategy = strategies.find((s) => {
+    const name = normalizeKey(s.name);
+    return name.includes("mercado livre") || name === "ml";
+  });
+
+  if (mlStrategy) {
+    const percent = Number(mlStrategy.pct) || 0;
+    const fixed = Number(mlStrategy.fix) || 0;
+    return {
+      label: mlStrategy.name || "Mercado Livre",
+      percent,
+      fixed,
+      fee: sellingPrice * (percent / 100) + fixed
+    };
+  }
+
+  const mlOverride =
+    feeConfig.overrides.find((o) => normalizeKey(o.name).includes("mercado livre")) || feeConfig.overrides[0];
+  const percent = Number(mlOverride?.percent ?? feeConfig.default.percent) || 0;
+  const fixed = Number(mlOverride?.fixed ?? feeConfig.default.fixed) || 0;
+  return {
+    label: mlOverride?.name || "Marketplace",
+    percent,
+    fixed,
+    fee: sellingPrice * (percent / 100) + fixed
+  };
+}
+
 export function ProductsPage() {
   const [items, setItems] = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -108,8 +175,10 @@ export function ProductsPage() {
   const [editKitQty, setEditKitQty] = useState(1);
   const [editImageData, setEditImageData] = useState("");
   const [editMaterials, setEditMaterials] = useState<EditMaterial[]>([makeEditMaterial()]);
+  const [editStrategies, setEditStrategies] = useState<EditStrategy[]>([makeEditStrategy()]);
   const [autoSyncInfo, setAutoSyncInfo] = useState<string | null>(null);
   const [manualSyncing, setManualSyncing] = useState(false);
+  const [feeConfig, setFeeConfig] = useState<OrderFeeConfig>(DEFAULT_ORDER_FEE_CONFIG);
   const syncRunningRef = useRef(false);
   const runSyncRef = useRef<null | (() => Promise<void>)>(null);
 
@@ -274,6 +343,8 @@ export function ProductsPage() {
         );
         if (!mounted) return;
         setItems(syncedItems);
+        const cfg = await loadOrderFeeConfig();
+        if (mounted) setFeeConfig(cfg);
         setSelected((prev) => {
           if (!prev) return null;
           return syncedItems.find((item) => String(item.id) === String(prev.id)) || prev;
@@ -322,6 +393,23 @@ export function ProductsPage() {
         unit_cost: Number(m.unit_cost) || 0
       }))
       .filter((m) => m.name || m.qty > 0 || m.unit_cost > 0);
+    const sourceStrategies = (json.strategies || [])
+      .map((s) => ({
+        id: crypto.randomUUID(),
+        name: String(s.name || ""),
+        pct: Number(s.pct) || 0,
+        fix: Number(s.fix) || 0
+      }))
+      .filter((s) => s.name || s.pct !== 0 || s.fix !== 0);
+    const fallbackStrategies = (feeConfig.overrides || []).map((item) =>
+      makeEditStrategyFromFeeOverride(item)
+    );
+    const strategiesToEdit =
+      sourceStrategies.length > 0
+        ? sourceStrategies
+        : fallbackStrategies.length > 0
+          ? fallbackStrategies
+          : [makeEditStrategyFromFeeOverride({ name: "Mercado Livre", percent: feeConfig.default.percent, fixed: feeConfig.default.fixed })];
 
     setEditMode(true);
     setEditStatus(null);
@@ -332,6 +420,7 @@ export function ProductsPage() {
     setEditKitQty(Math.max(1, Math.floor(Number(json.kit_qty) || 1)));
     setEditImageData(product.product_image_data || "");
     setEditMaterials(sourceMaterials.length > 0 ? sourceMaterials : [makeEditMaterial()]);
+    setEditStrategies(strategiesToEdit);
   }
 
   function cancelEdit() {
@@ -369,6 +458,13 @@ export function ProductsPage() {
         unit_cost: Number(m.unit_cost) || 0
       }))
       .filter((m) => m.name);
+    const cleanStrategies = editStrategies
+      .map((s) => ({
+        name: s.name.trim(),
+        pct: Number(s.pct) || 0,
+        fix: Number(s.fix) || 0
+      }))
+      .filter((s) => s.name);
 
     const nextJson: ProductJson = {
       ...oldJson,
@@ -376,6 +472,10 @@ export function ProductsPage() {
       materials: cleanMaterials.map((m) => ({
         ...m,
         cost: (Number(m.qty) || 0) * (Number(m.unit_cost) || 0)
+      })),
+      strategies: cleanStrategies.map((s) => ({
+        ...s,
+        price: Number(editPrice) || 0
       }))
     };
 
@@ -433,6 +533,29 @@ export function ProductsPage() {
     setEditMaterials((prev) => [...prev, makeEditMaterial()]);
   }
 
+  function updateEditStrategy(
+    id: string,
+    field: "name" | "pct" | "fix",
+    value: string
+  ) {
+    setEditStrategies((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        if (field === "name") return { ...item, name: value };
+        if (field === "pct") return { ...item, pct: Number(value) || 0 };
+        return { ...item, fix: Number(value) || 0 };
+      })
+    );
+  }
+
+  function addEditStrategy() {
+    setEditStrategies((prev) => [...prev, makeEditStrategy()]);
+  }
+
+  function removeEditStrategy(id: string) {
+    setEditStrategies((prev) => (prev.length <= 1 ? prev : prev.filter((item) => item.id !== id)));
+  }
+
   function removeEditMaterial(id: string) {
     setEditMaterials((prev) => (prev.length <= 1 ? prev : prev.filter((item) => item.id !== id)));
   }
@@ -485,7 +608,8 @@ export function ProductsPage() {
           const kitQty = Math.max(1, Math.floor(Number(json.kit_qty) || 1));
           const price = Number(p.selling_price) || 0;
           const cost = Number(p.base_cost) || 0;
-          const profit = price - cost;
+          const feePreview = pickMarketplaceFee(json, price, feeConfig);
+          const profit = price - feePreview.fee - cost;
 
           return (
             <button key={String(p.id)} className="product-card" onClick={() => setSelected(p)}>
@@ -501,9 +625,13 @@ export function ProductsPage() {
                 <h3>{p.product_name || "Sem nome"}</h3>
                 <p className="product-price">{fmt(price)}</p>
                 <div className="product-meta">
+                  <span>
+                    Regra: {Number(feePreview.percent).toLocaleString("pt-BR")} % + {fmt(Number(feePreview.fixed) || 0)}
+                  </span>
+                  <span>Taxa: {fmt(feePreview.fee)}</span>
                   <span>Custo: {fmt(cost)}</span>
                   <span className={profit >= 0 ? "profit-up" : "profit-down"}>
-                    Lucro: {fmt(profit)}
+                    Lucro liquido: {fmt(profit)}
                   </span>
                 </div>
               </div>
@@ -624,6 +752,51 @@ export function ProductsPage() {
                   + Adicionar material
                 </button>
 
+                <p className="pricing-lib-title">Taxas por marketplace</p>
+                <div className="pricing-rows">
+                  {editStrategies.map((item) => (
+                    <div className="pricing-row" key={item.id}>
+                      <input
+                        className="pricing-item-input"
+                        value={item.name}
+                        onChange={(e) => updateEditStrategy(item.id, "name", e.target.value)}
+                        placeholder="Marketplace"
+                      />
+                      <input
+                        className="pricing-small-input"
+                        type="number"
+                        step="0.01"
+                        value={item.pct}
+                        onChange={(e) => updateEditStrategy(item.id, "pct", e.target.value)}
+                        placeholder="%"
+                      />
+                      <input
+                        className="pricing-small-input"
+                        type="number"
+                        step="0.01"
+                        value={item.fix}
+                        onChange={(e) => updateEditStrategy(item.id, "fix", e.target.value)}
+                        placeholder="Fixo"
+                      />
+                      <input
+                        className="pricing-total-input"
+                        readOnly
+                        value={fmt((Number(editPrice) || 0) * ((Number(item.pct) || 0) / 100) + (Number(item.fix) || 0))}
+                      />
+                      <button
+                        type="button"
+                        className="pricing-trash"
+                        onClick={() => removeEditStrategy(item.id)}
+                      >
+                        Excluir
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" className="pricing-add-line" onClick={addEditStrategy}>
+                  + Adicionar taxa
+                </button>
+
                 {editImageData && (
                   <div className="pricing-image-preview-wrap">
                     <img src={editImageData} alt="Preview produto editado" className="pricing-image-preview" />
@@ -676,12 +849,26 @@ export function ProductsPage() {
               <div className="soft-panel">
                 <p>Estrategias ({selectedStrategies.length})</p>
                 {selectedStrategies.length === 0 ? (
-                  <span className="page-text">Nenhuma estrategia.</span>
+                  <div>
+                    <span className="page-text">Nenhuma estrategia no produto. Usando taxas cadastradas:</span>
+                    <ul>
+                      {(feeConfig.overrides.length > 0 ? feeConfig.overrides : [{
+                        id: "padrao",
+                        name: "Padrao",
+                        percent: feeConfig.default.percent,
+                        fixed: feeConfig.default.fixed
+                      }]).slice(0, 8).map((s) => (
+                        <li key={`${s.id}-${s.name}`}>
+                          {s.name} - {Number(s.percent).toLocaleString("pt-BR")} % + {fmt(Number(s.fixed) || 0)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 ) : (
                   <ul>
                     {selectedStrategies.slice(0, 8).map((s, i) => (
                       <li key={`${s.name || "estrategia"}-${i}`}>
-                        {s.name || "Canal"} - {fmt(Number(s.price) || 0)}
+                        {s.name || "Canal"} - {Number(s.pct || 0).toLocaleString("pt-BR")} % + {fmt(Number(s.fix) || 0)}
                       </li>
                     ))}
                   </ul>
@@ -710,3 +897,10 @@ export function ProductsPage() {
     </section>
   );
 }
+
+
+
+
+
+
+

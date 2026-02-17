@@ -1,5 +1,10 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
+import {
+  DEFAULT_ORDER_FEE_CONFIG,
+  type OrderFeeConfig,
+  loadOrderFeeConfig
+} from "../lib/orderFeeConfig";
 
 type SellerProfile = {
   id: number;
@@ -104,6 +109,7 @@ type OrderQuickFilter = "all" | "without_cost" | "high_fee" | "negative_profit";
 type SavedProduct = {
   id: string | number;
   product_name: string | null;
+  product_image_data?: string | null;
   base_cost: number | null;
   materials_json?: unknown;
 };
@@ -244,7 +250,12 @@ function calcPaymentFee(payment: NonNullable<Order["payments"]>[number]) {
   return 0;
 }
 
-function calcOrderFee(order: Order, total: number, paid: number) {
+function calcOrderFee(
+  order: Order,
+  total: number,
+  paid: number,
+  fallbackRule?: { percent: number; fixed: number }
+) {
   const payments = order.payments || [];
   let feeByPayments = 0;
   for (const p of payments) {
@@ -266,7 +277,12 @@ function calcOrderFee(order: Order, total: number, paid: number) {
   }
   if (feeByItems > 0) return feeByItems;
 
-  return Math.max(total - paid, 0);
+  const byDiff = Math.max(total - paid, 0);
+  if (byDiff > 0) return byDiff;
+
+  const percent = Number(fallbackRule?.percent) || 0;
+  const fixed = Number(fallbackRule?.fixed) || 0;
+  return total > 0 ? total * (percent / 100) + fixed : 0;
 }
 
 function calcOrderTaxes(order: Order) {
@@ -384,7 +400,10 @@ async function createCodeChallenge(verifier: string) {
   return base64UrlEncode(digest);
 }
 
-function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: TopProduct[]; lines: OrderLine[] } {
+function computeStats(
+  orders: Order[],
+  fallbackRule: { percent: number; fixed: number }
+): { stats: DashboardStats; topProducts: TopProduct[]; lines: OrderLine[] } {
   const validOrders = orders.filter((order) => !String(order.status || "").toLowerCase().includes("cancel"));
   const ordersCount = validOrders.length;
   let unitsCount = 0;
@@ -401,7 +420,7 @@ function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: To
   for (const order of orders) {
     const total = Number(order.total_amount) || 0;
     const paid = Number(order.paid_amount) || 0;
-    const fee = calcOrderFee(order, total, paid);
+    const fee = calcOrderFee(order, total, paid, fallbackRule);
     const taxes = calcOrderTaxes(order);
     const shipping = calcOrderShipping(order);
     const isCancelled = String(order.status || "").toLowerCase().includes("cancel");
@@ -512,6 +531,8 @@ export function MercadoLivrePage() {
   const [customizationSent, setCustomizationSent] = useState<Record<number, true>>({});
   const [sendingCustomizationKey, setSendingCustomizationKey] = useState<string | null>(null);
   const [customizationTemplate, setCustomizationTemplate] = useState(DEFAULT_CUSTOMIZATION_TEMPLATE);
+  const [feeConfig, setFeeConfig] = useState<OrderFeeConfig>(DEFAULT_ORDER_FEE_CONFIG);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const handledOauthCodeRef = useRef<string | null>(null);
   const syncRunningRef = useRef(false);
   const ordersTableRef = useRef<HTMLDivElement | null>(null);
@@ -603,7 +624,7 @@ export function MercadoLivrePage() {
 
       const { data: productsData } = await supabase
         .from("pricing_products")
-        .select("id, product_name, base_cost, materials_json")
+        .select("id, product_name, product_image_data, base_cost, materials_json")
         .eq("user_id", uid)
         .order("created_at", { ascending: false });
       setSavedProducts((productsData || []) as SavedProduct[]);
@@ -679,6 +700,19 @@ export function MercadoLivrePage() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+    async function loadFeeRules() {
+      const cfg = await loadOrderFeeConfig();
+      if (!mounted) return;
+      setFeeConfig(cfg);
+    }
+    void loadFeeRules();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!oauthCode || !userId) return;
     if (handledOauthCodeRef.current === oauthCode) return;
     handledOauthCodeRef.current = oauthCode;
@@ -698,7 +732,17 @@ export function MercadoLivrePage() {
     };
   }, [accessToken, rangeDays, userId]);
 
-  const dashboard = useMemo(() => computeStats(orders), [orders]);
+  const mlFallbackRule = useMemo(() => {
+    const mlOverride = feeConfig.overrides.find((row) =>
+      normalizeKey(row.name).includes("mercado livre")
+    );
+    return {
+      percent: Number(mlOverride?.percent ?? feeConfig.default.percent) || 0,
+      fixed: Number(mlOverride?.fixed ?? feeConfig.default.fixed) || 0
+    };
+  }, [feeConfig]);
+
+  const dashboard = useMemo(() => computeStats(orders, mlFallbackRule), [orders, mlFallbackRule]);
   const isConnected = Boolean(accessToken);
   const isConnectingState = bootstrapping || (isConnected && !seller);
   const productsById = useMemo(() => {
@@ -741,6 +785,7 @@ export function MercadoLivrePage() {
         ...line,
         linkedProductId: product ? String(product.id) : "",
         linkedProductName: product?.product_name || "",
+        linkedProductImage: product?.product_image_data || "",
         unitCost,
         totalCost,
         netProfit
@@ -792,6 +837,20 @@ export function MercadoLivrePage() {
   const realAvgProfit = useMemo(() => {
     return dashboard.stats.ordersCount > 0 ? realProfitTotal / dashboard.stats.ordersCount : 0;
   }, [dashboard.stats.ordersCount, realProfitTotal]);
+
+  const totalProductCost = useMemo(() => {
+    return linesWithCost.reduce((acc, row) => {
+      const cancelled = String(row.status || "").toLowerCase().includes("cancel");
+      return cancelled ? acc : acc + (Number(row.totalCost) || 0);
+    }, 0);
+  }, [linesWithCost]);
+
+  const adSpend = 0;
+  const contributionMargin = useMemo(() => {
+    return dashboard.stats.grossRevenue - dashboard.stats.feesEstimated - dashboard.stats.taxesEstimated - totalProductCost;
+  }, [dashboard.stats.grossRevenue, dashboard.stats.feesEstimated, dashboard.stats.taxesEstimated, totalProductCost]);
+
+  const marginAfterAds = useMemo(() => contributionMargin - adSpend, [contributionMargin]);
 
   const profitMarginPct = useMemo(() => {
     if (dashboard.stats.grossRevenue <= 0) return 0;
@@ -901,6 +960,61 @@ export function MercadoLivrePage() {
 
     return list.slice(0, 4);
   }, [linesWithCost, dashboard.stats.grossRevenue, dashboard.stats.feesEstimated, profitMarginPct]);
+
+  const assistantTips = useMemo(() => {
+    const tips: string[] = [];
+    const gross = dashboard.stats.grossRevenue;
+    const feeRatio = gross > 0 ? (dashboard.stats.feesEstimated / gross) * 100 : 0;
+    const withoutCost = linesWithCost.filter((row) => !row.linkedProductId).length;
+    const highFeeCount = linesWithCost.filter(
+      (row) =>
+        !String(row.status || "").toLowerCase().includes("cancel") &&
+        row.amount > 0 &&
+        row.fee / row.amount >= 0.28
+    ).length;
+
+    if (gross <= 0) {
+      tips.push("Sem vendas no periodo. Ajuste preco, foto e titulo dos anuncios para gerar tracao.");
+      return tips;
+    }
+
+    if (feeRatio >= 30) {
+      tips.push(`Tarifa media alta (${fmtPercent(feeRatio)}). Teste aumento de preco entre 5% e 8% nos itens com maior saida.`);
+    } else if (feeRatio >= 24) {
+      tips.push(`Tarifa media moderada (${fmtPercent(feeRatio)}). Reajuste de 2% a 4% nos produtos mais vendidos pode melhorar margem.`);
+    } else {
+      tips.push(`Tarifa media controlada (${fmtPercent(feeRatio)}). Escale os anuncios com melhor lucro.`);
+    }
+
+    if (profitMarginPct < 0) {
+      tips.push(`Margem negativa (${fmtPercent(profitMarginPct)}). Aja rapido: suba preco e revise custo do top 10 produtos.`);
+    } else if (profitMarginPct < 12) {
+      tips.push(`Margem baixa (${fmtPercent(profitMarginPct)}). Busque margem alvo acima de 20% no lucro liquido.`);
+    } else {
+      tips.push(`Margem atual ${fmtPercent(profitMarginPct)}. Foque em crescer volume dos produtos com melhor retorno.`);
+    }
+
+    if (withoutCost > 0) {
+      tips.push(`${withoutCost} pedido(s) sem custo vinculado. Anexe os produtos na tabela para analise de lucro real.`);
+    }
+
+    if (highFeeCount > 0) {
+      tips.push(`${highFeeCount} pedido(s) com tarifa alta. Considere kits maiores para diluir custo fixo por pedido.`);
+    }
+
+    if (dashboard.stats.avgTicket < 45) {
+      tips.push(`Ticket medio de ${fmtMoney(dashboard.stats.avgTicket)}. Crie kits para elevar para faixa de R$ 50+.`);
+    }
+
+    tips.push("Regra pratica: aplique +R$3 a +R$5 nos campeoes de venda e acompanhe o resultado por 7 dias.");
+    return tips.slice(0, 6);
+  }, [
+    dashboard.stats.grossRevenue,
+    dashboard.stats.feesEstimated,
+    dashboard.stats.avgTicket,
+    linesWithCost,
+    profitMarginPct
+  ]);
 
   const connectionStatus = useMemo(() => {
     if (loading || backgroundSyncing) {
@@ -1278,6 +1392,9 @@ export function MercadoLivrePage() {
           >
             {loading || backgroundSyncing ? "Sincronizando..." : "Sincronizar agora"}
           </button>
+          <button className="ghost-btn" type="button" onClick={() => setAssistantOpen(true)}>
+            Assistente de ganhos
+          </button>
         </div>
       </div>
 
@@ -1312,49 +1429,109 @@ export function MercadoLivrePage() {
         </div>
       </div>
 
-      <div className="kpi-grid kpi-grid-4 ml-kpi-grid">
-        <article className="kpi-card elevated">
-          <p>🛒 Vendas</p>
-          <strong>{dashboard.stats.ordersCount}</strong>
-          <span>{dashboard.stats.unitsCount} unidades</span>
-        </article>
-        <article className="kpi-card elevated">
-          <p>🎫 Ticket medio</p>
-          <strong>{fmtMoney(dashboard.stats.avgTicket)}</strong>
-        </article>
-        <article className="kpi-card elevated">
-          <p>💹 Lucro medio</p>
-          <strong>{fmtMoney(realAvgProfit)}</strong>
-        </article>
-        <article className="kpi-card elevated">
-          <p>❌ Canceladas</p>
-          <strong>{dashboard.stats.cancelledCount}</strong>
-          <span>{fmtMoney(dashboard.stats.cancelledAmount)}</span>
-        </article>
-        <article className="kpi-card elevated">
-          <p>🧾 Tarifas</p>
-          <strong>{fmtMoney(dashboard.stats.feesEstimated)}</strong>
-          <span>Estimado</span>
-        </article>
-        <article className="kpi-card elevated">
-          <p>🏛️ Impostos</p>
-          <strong>{fmtMoney(dashboard.stats.taxesEstimated)}</strong>
-          <span>Estimado</span>
-        </article>
-        <article className="kpi-card elevated">
-          <p>🚚 Frete</p>
-          <strong>{fmtMoney(dashboard.stats.shippingEstimated)}</strong>
-          <span>Estimado</span>
-        </article>
-        <article className="kpi-card elevated">
-          <p>
-            💵 Receita bruta
-            <span className="ml-help" title="Soma total das vendas antes de descontar tarifas, impostos e frete.">?</span>
-          </p>
+      <div className="ml-analysis-grid">
+        <article className="ml-analysis-card a-sales">
+          <h4><span>Vendas</span><span className="ml-analysis-icon">🧺</span></h4>
+          <p className="ml-analysis-help">Mostra o total vendido no periodo e o valor cancelado.</p>
           <strong>{fmtMoney(dashboard.stats.grossRevenue)}</strong>
-          <span>Antes dos descontos</span>
+          <div className="ml-analysis-row">
+            <span>Total {fmtMoney(dashboard.stats.grossRevenue)}</span>
+            <span>Cancelado {fmtMoney(dashboard.stats.cancelledAmount)}</span>
+          </div>
+        </article>
+
+        <article className="ml-analysis-card a-costs">
+          <h4><span>Tarifas e Custos</span><span className="ml-analysis-icon">💲</span></h4>
+          <p className="ml-analysis-help">Soma taxas do ML, impostos e custo dos produtos vinculados.</p>
+          <strong>
+            {fmtMoney(dashboard.stats.feesEstimated + dashboard.stats.taxesEstimated + totalProductCost)}
+            {" "}
+            ({fmtPercent(
+              dashboard.stats.grossRevenue > 0
+                ? ((dashboard.stats.feesEstimated + dashboard.stats.taxesEstimated + totalProductCost) / dashboard.stats.grossRevenue) * 100
+                : 0
+            )})
+          </strong>
+          <div className="ml-analysis-row">
+            <span>Custos {fmtMoney(totalProductCost)}</span>
+            <span>Tarifas {fmtMoney(dashboard.stats.feesEstimated)}</span>
+            <span>Impostos {fmtMoney(dashboard.stats.taxesEstimated)}</span>
+          </div>
+        </article>
+
+        <article className="ml-analysis-card a-shipping">
+          <h4><span>Frete</span><span className="ml-analysis-icon">🚚</span></h4>
+          <p className="ml-analysis-help">Exibe o total de frete pago pelo vendedor no periodo.</p>
+          <strong>{fmtMoney(dashboard.stats.shippingEstimated)}</strong>
+          <div className="ml-analysis-row">
+            <span>Vendedor {fmtMoney(dashboard.stats.shippingEstimated)}</span>
+            <span>Comprador {fmtMoney(0)}</span>
+          </div>
+        </article>
+
+        <article className="ml-analysis-card a-margin">
+          <h4><span>Margem de Contribuicao</span><span className="ml-analysis-icon">💳</span></h4>
+          <p className="ml-analysis-help">Receita bruta menos tarifas, impostos e custos de produto.</p>
+          <strong>
+            {fmtMoney(contributionMargin)} ({fmtPercent(
+              dashboard.stats.grossRevenue > 0 ? (contributionMargin / dashboard.stats.grossRevenue) * 100 : 0
+            )})
+          </strong>
+        </article>
+
+        <article className="ml-analysis-card a-ads">
+          <h4><span>Publicidade</span><span className="ml-analysis-icon">✨</span></h4>
+          <p className="ml-analysis-help">Quanto foi investido em anuncios no intervalo selecionado.</p>
+          <strong>
+            {fmtMoney(adSpend)} ({fmtPercent(
+              dashboard.stats.grossRevenue > 0 ? (adSpend / dashboard.stats.grossRevenue) * 100 : 0
+            )})
+          </strong>
+          <div className="ml-analysis-row">
+            <span>Sem gasto em anuncios no periodo</span>
+          </div>
+        </article>
+
+        <article className="ml-analysis-card a-margin-ads">
+          <h4><span>Margem Apos Ads</span><span className="ml-analysis-icon">🙂</span></h4>
+          <p className="ml-analysis-help">Margem de contribuicao descontando os gastos com anuncios.</p>
+          <strong>
+            {fmtMoney(marginAfterAds)} ({fmtPercent(
+              dashboard.stats.grossRevenue > 0 ? (marginAfterAds / dashboard.stats.grossRevenue) * 100 : 0
+            )})
+          </strong>
         </article>
       </div>
+
+      <details className="ml-more-info" open>
+        <summary>Mais informacoes</summary>
+        <div className="kpi-grid kpi-grid-4 ml-kpi-grid">
+          <article className="kpi-card elevated">
+            <p>Numero de vendas</p>
+            <span className="ml-kpi-help">Quantidade de pedidos aprovados no periodo.</span>
+            <strong>{dashboard.stats.ordersCount}</strong>
+            <span>Canceladas {dashboard.stats.cancelledCount}</span>
+          </article>
+          <article className="kpi-card elevated">
+            <p>Unidades vendidas</p>
+            <span className="ml-kpi-help">Total de itens vendidos somando todos os pedidos.</span>
+            <strong>{dashboard.stats.unitsCount}</strong>
+            <span>Cancelada 0</span>
+          </article>
+          <article className="kpi-card elevated">
+            <p>Ticket medio</p>
+            <span className="ml-kpi-help">Valor medio por pedido (receita bruta / numero de vendas).</span>
+            <strong>{fmtMoney(dashboard.stats.avgTicket)}</strong>
+            <span>Preco medio {fmtMoney(dashboard.stats.avgTicket)}</span>
+          </article>
+          <article className="kpi-card elevated">
+            <p>Taxa de conversao</p>
+            <span className="ml-kpi-help">Percentual de visitas que viraram venda (quando houver visitas).</span>
+            <strong>0%</strong>
+            <span>0 visitas</span>
+          </article>
+        </div>
+      </details>
 
       <div className="ml-alerts-board">
         <div className="ml-alerts-head">
@@ -1386,24 +1563,24 @@ export function MercadoLivrePage() {
 
       <div className="ml-ads-strip">
         <div>
-          <p>Investimento em Ads</p>
-          <strong>{fmtMoney(0)}</strong>
-        </div>
-        <div>
           <p>Receita bruta</p>
           <strong>{fmtMoney(dashboard.stats.grossRevenue)}</strong>
         </div>
         <div>
-          <p>ROAS</p>
-          <strong>N/D</strong>
+          <p>Receita liquida</p>
+          <strong>{fmtMoney(dashboard.stats.netRevenue)}</strong>
         </div>
         <div>
-          <p>ACOS</p>
-          <strong>N/D</strong>
+          <p>Lucro estimado</p>
+          <strong>{fmtMoney(realProfitTotal)}</strong>
         </div>
         <div>
-          <p>TACOS</p>
-          <strong>N/D</strong>
+          <p>Margem</p>
+          <strong>{fmtPercent(profitMarginPct)}</strong>
+        </div>
+        <div>
+          <p>Tarifa media</p>
+          <strong>{fmtPercent(dashboard.stats.grossRevenue > 0 ? (dashboard.stats.feesEstimated / dashboard.stats.grossRevenue) * 100 : 0)}</strong>
         </div>
       </div>
 
@@ -1437,7 +1614,7 @@ export function MercadoLivrePage() {
               <li>Seller ID: {seller.id}</li>
               <li>Nickname: {seller.nickname || "-"}</li>
               <li>Nome: {[seller.first_name, seller.last_name].filter(Boolean).join(" ") || "-"}</li>
-              <li>Receita paga: {fmtMoney(dashboard.stats.grossRevenue)}</li>
+              <li>Receita paga: {fmtMoney(dashboard.stats.paidRevenue)}</li>
             </ul>
           ) : isConnectingState ? (
             <p className="page-text">Conta conectada. Sincronizando dados...</p>
@@ -1501,7 +1678,6 @@ export function MercadoLivrePage() {
                 <th>Qtde</th>
                 <th>Valor</th>
                 <th>Tarifa</th>
-                <th>Acoes</th>
                 <th>Custo Produto</th>
                 <th>Lucro</th>
               </tr>
@@ -1509,44 +1685,40 @@ export function MercadoLivrePage() {
             <tbody>
               {pagedLines.length === 0 ? (
                 <tr>
-                  <td colSpan={11}>Sem pedidos no periodo selecionado.</td>
+                  <td colSpan={10}>Sem pedidos no periodo selecionado.</td>
                 </tr>
               ) : (
                 pagedLines.map((row) => (
                   <tr key={row.id}>
                     <td>
-                      {row.thumb ? (
-                        <img className="ml-thumb" src={row.thumb} alt={row.title} />
-                      ) : (
-                        <span className="ml-thumb-fallback">📦</span>
-                      )}
+                      {row.thumb || row.linkedProductImage ? (
+                        <img
+                          className="ml-thumb"
+                          src={String(row.thumb || row.linkedProductImage || "").replace(/^http:\/\//i, "https://")}
+                          alt={row.title}
+                          loading="lazy"
+                          onError={(e) => {
+                            const img = e.currentTarget;
+                            img.style.display = "none";
+                            const fallback = img.nextElementSibling as HTMLElement | null;
+                            if (fallback) fallback.style.display = "inline-flex";
+                          }}
+                        />
+                      ) : null}
+                      <span
+                        className="ml-thumb-fallback"
+                        style={{ display: row.thumb || row.linkedProductImage ? "none" : "inline-flex" }}
+                      >
+                        📦
+                      </span>
                     </td>
-                    <td>#{row.id}</td>
+                    <td className="ml-col-order-id">#{row.id}</td>
                     <td className="ml-col-title">{row.title}</td>
                     <td>{row.sku}</td>
                     <td>{row.date}</td>
                     <td>{row.qty}</td>
                     <td>{fmtMoney(row.amount)}</td>
                     <td>{fmtMoney(row.fee)}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="ml-alert-action-btn"
-                        onClick={() => void sendCustomizationRequest(row)}
-                        disabled={
-                          !accessToken ||
-                          Boolean(customizationSent[row.id]) ||
-                          sendingCustomizationKey === `${row.id}-${row.packId}`
-                        }
-                        title={!row.packId ? "Sem pack_id: sera tentado fallback por order_id." : ""}
-                      >
-                        {customizationSent[row.id]
-                          ? "Mensagem enviada"
-                          : sendingCustomizationKey === `${row.id}-${row.packId}`
-                              ? "Enviando..."
-                              : "Solicitar dados"}
-                      </button>
-                    </td>
                     <td>
                       <div className="ml-cost-cell">
                         <strong>{fmtMoney(row.totalCost)}</strong>
@@ -1618,6 +1790,27 @@ export function MercadoLivrePage() {
         </div>
       )}
 
+      {assistantOpen && (
+        <div className="assistant-modal-backdrop" onClick={() => setAssistantOpen(false)}>
+          <div className="assistant-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="assistant-modal-head">
+              <h3>Assistente de Negocio</h3>
+              <button type="button" className="ghost-btn" onClick={() => setAssistantOpen(false)}>
+                Fechar
+              </button>
+            </div>
+            <p className="page-text">
+              Analise automatica das vendas do periodo selecionado:
+            </p>
+            <ul className="assistant-tips">
+              {assistantTips.map((tip, idx) => (
+                <li key={`${idx}-${tip.slice(0, 16)}`}>{tip}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
       {syncError && <p className="error-text">{syncErrorFriendly}</p>}
       {syncInfo && <p className="page-text">{syncInfo}</p>}
 
@@ -1627,3 +1820,6 @@ export function MercadoLivrePage() {
     </section>
   );
 }
+
+
+
