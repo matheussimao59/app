@@ -972,8 +972,21 @@ export function MercadoLivrePage() {
         }
       });
       if (error) throw new Error(error.message);
-      const ok = Boolean((data as { ok?: boolean } | null)?.ok);
-      if (!ok) throw new Error("Resposta invalida no envio da mensagem.");
+      const resp = (data as {
+        ok?: boolean;
+        message?: string;
+        details?: string;
+        error?: string;
+      } | null) || {};
+      const ok = Boolean(resp.ok);
+      if (!ok) {
+        const reason =
+          String(resp.message || "").trim() ||
+          String(resp.details || "").trim() ||
+          String(resp.error || "").trim() ||
+          "Falha no envio.";
+        throw new Error(reason);
+      }
 
       const next: Record<number, true> = { ...customizationSent, [row.id]: true as const };
       setCustomizationSent(next);

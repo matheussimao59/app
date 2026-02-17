@@ -83,7 +83,11 @@ serve(async (req) => {
     const text = String(payload?.message || "").trim();
 
     if (!accessToken || !sellerId || !orderId || !text) {
-      return jsonResponse({ error: "missing_required_fields" }, 400);
+      return jsonResponse({
+        ok: false,
+        error: "missing_required_fields",
+        message: "Campos obrigatorios ausentes para envio da mensagem."
+      });
     }
 
     let optionId = "REQUEST_VARIANTS";
@@ -160,16 +164,18 @@ serve(async (req) => {
       }
     }
 
-    return jsonResponse(
-      {
-        error: "ml_message_send_failed",
-        message: "Nao foi possivel enviar mensagem de personalizacao.",
-        details: lastError
-      },
-      400
-    );
+    return jsonResponse({
+      ok: false,
+      error: "ml_message_send_failed",
+      message: "Nao foi possivel enviar mensagem de personalizacao.",
+      details: lastError
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "internal_error";
-    return jsonResponse({ error: "internal_error", message }, 500);
+    return jsonResponse({
+      ok: false,
+      error: "internal_error",
+      message
+    });
   }
 });
