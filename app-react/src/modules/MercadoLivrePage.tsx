@@ -170,6 +170,10 @@ function friendlySyncError(message?: string | null) {
   if (!raw) return "";
   const lower = raw.toLowerCase();
 
+  if (lower.includes("mensagem de personalizacao")) {
+    return raw;
+  }
+
   if (lower.includes("timeout_sync")) {
     return "Sincronizacao demorou mais do que o esperado. Tente novamente em alguns segundos.";
   }
@@ -947,10 +951,6 @@ export function MercadoLivrePage() {
       setSyncError("Conecte a conta Mercado Livre para enviar mensagem de personalizacao.");
       return;
     }
-    if (!row.packId) {
-      setSyncError("Pedido sem pack_id para abrir mensagem de personalizacao.");
-      return;
-    }
     if (customizationSent[row.id]) {
       setSyncInfo(`Mensagem de personalizacao ja enviada para o pedido #${row.id}.`);
       return;
@@ -966,7 +966,7 @@ export function MercadoLivrePage() {
           access_token: accessToken,
           seller_id: seller.id,
           order_id: row.id,
-          pack_id: row.packId,
+          pack_id: row.packId || null,
           message:
             customizationTemplate
         }
@@ -989,7 +989,7 @@ export function MercadoLivrePage() {
       setSyncInfo(`Mensagem de personalizacao enviada para o pedido #${row.id}.`);
     } catch (sendError) {
       const message = sendError instanceof Error ? sendError.message : "erro_desconhecido";
-      setSyncError(`Nao foi possivel enviar mensagem de personalizacao. Detalhe: ${message}`);
+      setSyncError(`Nao foi possivel enviar mensagem de personalizacao. Detalhe tecnico: ${message}`);
     } finally {
       setSendingCustomizationKey(null);
     }
@@ -1505,17 +1505,14 @@ export function MercadoLivrePage() {
                         onClick={() => void sendCustomizationRequest(row)}
                         disabled={
                           !accessToken ||
-                          !row.packId ||
                           Boolean(customizationSent[row.id]) ||
                           sendingCustomizationKey === `${row.id}-${row.packId}`
                         }
-                        title={!row.packId ? "Pedido sem pack_id para mensageria." : ""}
+                        title={!row.packId ? "Sem pack_id: sera tentado fallback por order_id." : ""}
                       >
                         {customizationSent[row.id]
                           ? "Mensagem enviada"
-                          : !row.packId
-                            ? "Sem pack_id"
-                            : sendingCustomizationKey === `${row.id}-${row.packId}`
+                          : sendingCustomizationKey === `${row.id}-${row.packId}`
                               ? "Enviando..."
                               : "Solicitar dados"}
                       </button>

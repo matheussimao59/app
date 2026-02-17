@@ -82,43 +82,63 @@ serve(async (req) => {
     const orderId = Number(payload?.order_id) || 0;
     const text = String(payload?.message || "").trim();
 
-    if (!accessToken || !sellerId || !packId || !text) {
+    if (!accessToken || !sellerId || !orderId || !text) {
       return jsonResponse({ error: "missing_required_fields" }, 400);
     }
 
-    // Valida capacidade de envio no pack (quando endpoint disponivel).
-    try {
-      await fetchMl(`/messages/action_guide/packs/${packId}/caps_available?tag=post_sale`, accessToken);
-    } catch {
-      // Nao bloqueia: alguns sellers/apps podem ter resposta diferente.
-    }
-
     let optionId = "REQUEST_VARIANTS";
-    try {
-      const optionsPayload = await fetchMl(
-        `/messages/action_guide/packs/${packId}/options?tag=post_sale`,
-        accessToken
-      );
-      const found = findRequestVariantsOption(optionsPayload);
-      if (found) optionId = found;
-    } catch {
-      // fallback para REQUEST_VARIANTS em texto
+    if (packId > 0) {
+      // Valida capacidade de envio no pack (quando endpoint disponivel).
+      try {
+        await fetchMl(`/messages/action_guide/packs/${packId}/caps_available?tag=post_sale`, accessToken);
+      } catch {
+        // Nao bloqueia: alguns sellers/apps podem ter resposta diferente.
+      }
+
+      try {
+        const optionsPayload = await fetchMl(
+          `/messages/action_guide/packs/${packId}/options?tag=post_sale`,
+          accessToken
+        );
+        const found = findRequestVariantsOption(optionsPayload);
+        if (found) optionId = found;
+      } catch {
+        // fallback para REQUEST_VARIANTS em texto
+      }
     }
 
-    const attempts: Array<{ path: string; body: Record<string, unknown> }> = [
+    const attempts: Array<{ path: string; body: Record<string, unknown> }> = [];
+    if (packId > 0) {
+      attempts.push(
+        {
+          path: `/messages/action_guide/packs/${packId}/sellers/${sellerId}?tag=post_sale`,
+          body: { text, option_id: optionId }
+        },
+        {
+          path: `/messages/action_guide/packs/${packId}/option/${optionId}/sellers/${sellerId}?tag=post_sale`,
+          body: { text }
+        },
+        {
+          path: `/messages/action_guide/packs/${packId}/options/${optionId}/sellers/${sellerId}?tag=post_sale`,
+          body: { text }
+        }
+      );
+    }
+    // Fallback por order_id quando pack nao estiver disponivel.
+    attempts.push(
       {
-        path: `/messages/action_guide/packs/${packId}/sellers/${sellerId}?tag=post_sale`,
+        path: `/messages/action_guide/orders/${orderId}/sellers/${sellerId}?tag=post_sale`,
         body: { text, option_id: optionId }
       },
       {
-        path: `/messages/action_guide/packs/${packId}/option/${optionId}/sellers/${sellerId}?tag=post_sale`,
+        path: `/messages/action_guide/orders/${orderId}/option/${optionId}/sellers/${sellerId}?tag=post_sale`,
         body: { text }
       },
       {
-        path: `/messages/action_guide/packs/${packId}/options/${optionId}/sellers/${sellerId}?tag=post_sale`,
+        path: `/messages/action_guide/orders/${orderId}/options/${optionId}/sellers/${sellerId}?tag=post_sale`,
         body: { text }
       }
-    ];
+    );
 
     let lastError = "";
     for (const attempt of attempts) {
@@ -153,4 +173,3 @@ serve(async (req) => {
     return jsonResponse({ error: "internal_error", message }, 500);
   }
 });
-
