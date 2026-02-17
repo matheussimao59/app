@@ -39,6 +39,38 @@ body {
   padding: 24px;
 }
 
+.loading-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid #c7d2fe;
+  background: linear-gradient(180deg, #eef2ff, #f8fafc);
+  color: #312e81;
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.loading-indicator.centered {
+  margin: 0 auto;
+}
+
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid rgba(79, 70, 229, 0.22);
+  border-top-color: #4f46e5;
+  animation: spin-360 0.8s linear infinite;
+}
+
+@keyframes spin-360 {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .login-bg {
   background:
     radial-gradient(circle at 12% 15%, #c7d2fe 0, transparent 35%),
@@ -1555,6 +1587,16 @@ body {
   padding: 10px 12px;
 }
 
+.field textarea {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+  resize: vertical;
+  min-height: 120px;
+  font-family: inherit;
+}
+
 .field input:focus {
   outline: none;
   border-color: #818cf8;
@@ -1562,6 +1604,12 @@ body {
 }
 
 .field select:focus {
+  outline: none;
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+
+.field textarea:focus {
   outline: none;
   border-color: #818cf8;
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);

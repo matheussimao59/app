@@ -104,7 +104,10 @@ export function SettingsPage() {
       </div>
 
       {loading ? (
-        <p className="page-text">Carregando configuracoes...</p>
+        <div className="loading-indicator centered" role="status" aria-live="polite">
+          <span className="loading-spinner" aria-hidden="true" />
+          <span>Carregando configuracoes...</span>
+        </div>
       ) : (
         <>
           <div className="form-grid two-col">

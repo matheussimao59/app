@@ -142,7 +142,12 @@ export function DashboardPage() {
       <div className="ops-grid">
         <article className="ops-card">
           <h3>Status do sistema</h3>
-          {loading && <p>Carregando indicadores...</p>}
+          {loading && (
+            <div className="loading-indicator" role="status" aria-live="polite">
+              <span className="loading-spinner" aria-hidden="true" />
+              <span>Carregando indicadores...</span>
+            </div>
+          )}
           {!loading && error && <p className="error-text">Erro: {error}</p>}
           {!loading && !error && (
             <ul className="task-list">

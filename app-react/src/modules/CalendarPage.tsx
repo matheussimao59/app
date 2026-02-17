@@ -1131,7 +1131,12 @@ export function CalendarPage() {
         </button>
       </div>
 
-      {loading && <p className="page-text">Carregando calendario...</p>}
+      {loading && (
+        <div className="loading-indicator centered" role="status" aria-live="polite">
+          <span className="loading-spinner" aria-hidden="true" />
+          <span>Carregando calendario...</span>
+        </div>
+      )}
       {status && <p className="page-text">{status}</p>}
 
       {!loading && (

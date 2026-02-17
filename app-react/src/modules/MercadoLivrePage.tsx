@@ -20,6 +20,7 @@ type OrderItem = {
 
 type Order = {
   id: number;
+  pack_id?: number | string;
   date_created?: string;
   status?: string;
   total_amount?: number;
@@ -76,6 +77,7 @@ type TopProduct = {
 
 type OrderLine = {
   id: number;
+  packId: number;
   title: string;
   sku: string;
   thumb: string;
@@ -118,6 +120,9 @@ const PERIODS = [
   { label: "30 dias", days: 30 },
   { label: "Mes atual", days: 31 }
 ];
+
+const DEFAULT_CUSTOMIZATION_TEMPLATE =
+  "Ola! Obrigado pela compra. Para iniciar a personalizacao, envie: nome/texto, tema/cores e detalhes do pedido.";
 
 function getRangeByPeriod(days: number) {
   const now = new Date();
@@ -290,6 +295,14 @@ function costLinksSettingId(userId: string) {
   return `ml_cost_links_${userId}`;
 }
 
+function customizationSentSettingId(userId: string) {
+  return `ml_customization_sent_${userId}`;
+}
+
+function customizationTemplateSettingId(userId: string) {
+  return `ml_customization_template_${userId}`;
+}
+
 function normalizeKey(text?: string) {
   return String(text || "")
     .normalize("NFD")
@@ -313,6 +326,10 @@ function ordersCacheKey(userId: string) {
 
 function lastSyncCacheKey(userId: string) {
   return `ml_last_sync_cache_${userId}`;
+}
+
+function customizationSentCacheKey(userId: string) {
+  return `ml_customization_sent_${userId}`;
 }
 
 function normalizeMlRedirectUri(input?: string) {
@@ -422,6 +439,7 @@ function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: To
 
     lines.push({
       id: order.id,
+      packId: Number(order.pack_id) || 0,
       title: rowTitle,
       sku: rowSku,
       thumb: orderItemThumb(order),
@@ -487,6 +505,9 @@ export function MercadoLivrePage() {
   const [savingLinkKey, setSavingLinkKey] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [orderQuickFilter, setOrderQuickFilter] = useState<OrderQuickFilter>("all");
+  const [customizationSent, setCustomizationSent] = useState<Record<number, true>>({});
+  const [sendingCustomizationKey, setSendingCustomizationKey] = useState<string | null>(null);
+  const [customizationTemplate, setCustomizationTemplate] = useState(DEFAULT_CUSTOMIZATION_TEMPLATE);
   const handledOauthCodeRef = useRef<string | null>(null);
   const syncRunningRef = useRef(false);
   const ordersTableRef = useRef<HTMLDivElement | null>(null);
@@ -538,6 +559,22 @@ export function MercadoLivrePage() {
       if (cachedLastSync) {
         setLastSyncAt(cachedLastSync);
       }
+      try {
+        const cachedCustomization = localStorage.getItem(customizationSentCacheKey(uid));
+        if (cachedCustomization) {
+          const parsed = JSON.parse(cachedCustomization) as Array<number | string>;
+          if (Array.isArray(parsed)) {
+            const mapped: Record<number, true> = {};
+            for (const orderId of parsed) {
+              const n = Number(orderId) || 0;
+              if (n > 0) mapped[n] = true;
+            }
+            setCustomizationSent(mapped);
+          }
+        }
+      } catch {
+        // ignore
+      }
 
       const { data: tokenRow } = await supabase
         .from("app_settings")
@@ -577,6 +614,39 @@ export function MercadoLivrePage() {
         by_sku: rawLinks.by_sku || {},
         by_title: rawLinks.by_title || {}
       });
+
+      const { data: customizationRow } = await supabase
+        .from("app_settings")
+        .select("config_data")
+        .eq("id", customizationSentSettingId(uid))
+        .maybeSingle();
+      const sentOrderIds =
+        ((customizationRow?.config_data as { sent_order_ids?: Array<number | string> } | null)
+          ?.sent_order_ids || []) as Array<number | string>;
+      if (Array.isArray(sentOrderIds) && sentOrderIds.length > 0) {
+        const mapped: Record<number, true> = {};
+        for (const orderId of sentOrderIds) {
+          const n = Number(orderId) || 0;
+          if (n > 0) mapped[n] = true;
+        }
+        setCustomizationSent(mapped);
+        localStorage.setItem(
+          customizationSentCacheKey(uid),
+          JSON.stringify(Object.keys(mapped).map((id) => Number(id)))
+        );
+      }
+
+      const { data: templateRow } = await supabase
+        .from("app_settings")
+        .select("config_data")
+        .eq("id", customizationTemplateSettingId(uid))
+        .maybeSingle();
+      const savedTemplate = String(
+        (templateRow?.config_data as { template?: string } | null)?.template || ""
+      ).trim();
+      if (savedTemplate) {
+        setCustomizationTemplate(savedTemplate);
+      }
       setBootstrapping(false);
     }
 
@@ -871,6 +941,60 @@ export function MercadoLivrePage() {
     setSavingLinkKey(null);
   }
 
+  async function sendCustomizationRequest(row: (typeof linesWithCost)[number]) {
+    if (!supabase || !userId) return;
+    if (!accessToken || !seller?.id) {
+      setSyncError("Conecte a conta Mercado Livre para enviar mensagem de personalizacao.");
+      return;
+    }
+    if (!row.packId) {
+      setSyncError("Pedido sem pack_id para abrir mensagem de personalizacao.");
+      return;
+    }
+    if (customizationSent[row.id]) {
+      setSyncInfo(`Mensagem de personalizacao ja enviada para o pedido #${row.id}.`);
+      return;
+    }
+
+    const buttonKey = `${row.id}-${row.packId}`;
+    setSendingCustomizationKey(buttonKey);
+    setSyncError(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("ml-send-customization", {
+        body: {
+          access_token: accessToken,
+          seller_id: seller.id,
+          order_id: row.id,
+          pack_id: row.packId,
+          message:
+            customizationTemplate
+        }
+      });
+      if (error) throw new Error(error.message);
+      const ok = Boolean((data as { ok?: boolean } | null)?.ok);
+      if (!ok) throw new Error("Resposta invalida no envio da mensagem.");
+
+      const next: Record<number, true> = { ...customizationSent, [row.id]: true as const };
+      setCustomizationSent(next);
+      const sentOrderIds = Object.keys(next).map((id) => Number(id)).filter((id) => id > 0);
+      localStorage.setItem(customizationSentCacheKey(userId), JSON.stringify(sentOrderIds));
+      await supabase.from("app_settings").upsert({
+        id: customizationSentSettingId(userId),
+        config_data: {
+          sent_order_ids: sentOrderIds,
+          updated_at: new Date().toISOString()
+        }
+      });
+      setSyncInfo(`Mensagem de personalizacao enviada para o pedido #${row.id}.`);
+    } catch (sendError) {
+      const message = sendError instanceof Error ? sendError.message : "erro_desconhecido";
+      setSyncError(`Nao foi possivel enviar mensagem de personalizacao. Detalhe: ${message}`);
+    } finally {
+      setSendingCustomizationKey(null);
+    }
+  }
+
   function runAlertAction(filter: OrderQuickFilter) {
     setOrderQuickFilter(filter);
     setCurrentPage(1);
@@ -969,10 +1093,12 @@ export function MercadoLivrePage() {
       localStorage.removeItem(tokenCacheKey(userId));
       localStorage.removeItem(ordersCacheKey(userId));
       localStorage.removeItem(lastSyncCacheKey(userId));
+      localStorage.removeItem(customizationSentCacheKey(userId));
     }
     setAccessToken("");
     setSeller(null);
     setOrders([]);
+    setCustomizationSent({});
     setOauthCode(null);
     setSyncInfo("Conexao removida.");
     setSyncError(null);
@@ -1345,6 +1471,7 @@ export function MercadoLivrePage() {
                 <th>Qtde</th>
                 <th>Valor</th>
                 <th>Tarifa</th>
+                <th>Acoes</th>
                 <th>Custo Produto</th>
                 <th>Lucro</th>
               </tr>
@@ -1352,7 +1479,7 @@ export function MercadoLivrePage() {
             <tbody>
               {pagedLines.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>Sem pedidos no periodo selecionado.</td>
+                  <td colSpan={11}>Sem pedidos no periodo selecionado.</td>
                 </tr>
               ) : (
                 pagedLines.map((row) => (
@@ -1371,6 +1498,28 @@ export function MercadoLivrePage() {
                     <td>{row.qty}</td>
                     <td>{fmtMoney(row.amount)}</td>
                     <td>{fmtMoney(row.fee)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="ml-alert-action-btn"
+                        onClick={() => void sendCustomizationRequest(row)}
+                        disabled={
+                          !accessToken ||
+                          !row.packId ||
+                          Boolean(customizationSent[row.id]) ||
+                          sendingCustomizationKey === `${row.id}-${row.packId}`
+                        }
+                        title={!row.packId ? "Pedido sem pack_id para mensageria." : ""}
+                      >
+                        {customizationSent[row.id]
+                          ? "Mensagem enviada"
+                          : !row.packId
+                            ? "Sem pack_id"
+                            : sendingCustomizationKey === `${row.id}-${row.packId}`
+                              ? "Enviando..."
+                              : "Solicitar dados"}
+                      </button>
+                    </td>
                     <td>
                       <div className="ml-cost-cell">
                         <strong>{fmtMoney(row.totalCost)}</strong>

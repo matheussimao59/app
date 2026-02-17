@@ -467,7 +467,12 @@ export function ProductsPage() {
         />
       </div>
 
-      {loading && <p className="page-text">Carregando produtos...</p>}
+      {loading && (
+        <div className="loading-indicator centered" role="status" aria-live="polite">
+          <span className="loading-spinner" aria-hidden="true" />
+          <span>Carregando produtos...</span>
+        </div>
+      )}
       {!loading && error && <p className="error-text">Erro: {error}</p>}
       {!loading && !error && filtered.length === 0 && (
         <p className="page-text">Nenhum produto encontrado.</p>

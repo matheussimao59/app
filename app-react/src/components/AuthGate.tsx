@@ -61,7 +61,14 @@ export function AuthGate({ children }: AuthGateProps) {
   }
 
   if (loading) {
-    return <div className="center-screen">Carregando...</div>;
+    return (
+      <div className="center-screen login-bg">
+        <div className="loading-indicator">
+          <span className="loading-spinner" aria-hidden="true" />
+          <span>Carregando...</span>
+        </div>
+      </div>
+    );
   }
 
   if (user) {

@@ -4,6 +4,7 @@ Este projeto usa duas funcoes:
 
 - `ml-oauth-token`: troca `code` por `access_token`.
 - `ml-sync`: sincroniza seller + pedidos (30 dias) sem CORS no navegador.
+- `ml-send-customization`: envia mensagem padrao de personalizacao no pos-venda.
 - `nf-emit`: emissao inicial de NF (fase 1, stub para integrar provedor fiscal).
 - `nf-status`: consulta status da NF no provedor e retorna XML/PDF/chave quando disponivel.
 
@@ -26,6 +27,7 @@ supabase secrets set ML_CLIENT_SECRET=COLE_AQUI_SEU_CLIENT_SECRET
 ```bash
 supabase functions deploy ml-oauth-token
 supabase functions deploy ml-sync
+supabase functions deploy ml-send-customization
 supabase functions deploy nf-emit
 supabase functions deploy nf-status
 ```

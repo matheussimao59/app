@@ -1,5 +1,5 @@
 ﻿import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 type BaseNavItem = {
   id: string;
@@ -77,8 +77,11 @@ function NavIcon({ id }: { id: string }) {
 
 export function AppLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [mlMenuOpen, setMlMenuOpen] = useState(true);
+  const location = useLocation();
+  const mlActive = location.pathname.startsWith("/mercado-livre");
+
   const navItems: BaseNavItem[] = [
-    { id: "mercado_livre", label: "Mercado Livre", path: "/mercado-livre" },
     ...(isLocalNfEnabled ? [{ id: "nota_fiscal", label: "Nota Fiscal", path: "/nota-fiscal" }] : []),
     { id: "precificacao", label: "Precificacao", path: "/precificacao" },
     { id: "calendario", label: "Calendario", path: "/calendario" },
@@ -103,6 +106,35 @@ export function AppLayout() {
         </div>
 
         <nav>
+          <div className={mlActive ? "nav-group active" : "nav-group"}>
+            <button type="button" className="nav-group-trigger" onClick={() => setMlMenuOpen((v) => !v)}>
+              <span className="nav-badge" aria-hidden="true">
+                <NavIcon id="mercado_livre" />
+              </span>
+              <span>Mercado Livre</span>
+              <span className="nav-group-chevron">{mlMenuOpen ? "▾" : "▸"}</span>
+            </button>
+            {mlMenuOpen && (
+              <div className="nav-submenu">
+                <NavLink
+                  to="/mercado-livre"
+                  end
+                  onClick={closeMenu}
+                  className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
+                >
+                  Painel
+                </NavLink>
+                <NavLink
+                  to="/mercado-livre/mensagens"
+                  onClick={closeMenu}
+                  className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
+                >
+                  Mensagens
+                </NavLink>
+              </div>
+            )}
+          </div>
+
           {navItems.map((item) => (
             <NavLink
               key={item.id}
