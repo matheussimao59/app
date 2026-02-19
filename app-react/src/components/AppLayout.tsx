@@ -131,6 +131,13 @@ export function AppLayout() {
                 >
                   Mensagens
                 </NavLink>
+                <NavLink
+                  to="/mercado-livre/separacao"
+                  onClick={closeMenu}
+                  className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
+                >
+                  Separacao de Pedidos
+                </NavLink>
               </div>
             )}
           </div>

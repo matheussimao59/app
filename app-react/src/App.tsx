@@ -8,6 +8,7 @@ import { ProductsPage } from "./modules/ProductsPage";
 import { SettingsPage } from "./modules/SettingsPage";
 import { MercadoLivrePage } from "./modules/MercadoLivrePage";
 import { MercadoLivreMensagensPage } from "./modules/MercadoLivreMensagensPage";
+import { MercadoLivreSeparacaoPage } from "./modules/MercadoLivreSeparacaoPage";
 import { TesteImpressaoPage } from "./modules/TesteImpressaoPage";
 import { NotaFiscalPage } from "./modules/NotaFiscalPage";
 
@@ -26,6 +27,7 @@ export function App() {
             <Route path="produtos" element={<ProductsPage />} />
             <Route path="mercado-livre" element={<MercadoLivrePage />} />
             <Route path="mercado-livre/mensagens" element={<MercadoLivreMensagensPage />} />
+            <Route path="mercado-livre/separacao" element={<MercadoLivreSeparacaoPage />} />
             {isLocalNfEnabled && <Route path="nota-fiscal" element={<NotaFiscalPage />} />}
             <Route path="teste-impressao" element={<TesteImpressaoPage />} />
             <Route path="configuracoes" element={<SettingsPage />} />

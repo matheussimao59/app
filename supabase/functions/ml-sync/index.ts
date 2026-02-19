@@ -65,6 +65,156 @@ async function fetchItemsThumbs(itemIds: string[], accessToken: string) {
   return thumbById;
 }
 
+function asStringDate(value: unknown) {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  if (!text) return "";
+  const d = new Date(text);
+  if (Number.isNaN(d.getTime())) return "";
+  return text;
+}
+
+function firstValidDate(candidates: unknown[]) {
+  for (const c of candidates) {
+    const value = asStringDate(c);
+    if (value) return value;
+  }
+  return "";
+}
+
+function resolveShippingDate(order: {
+  date_created?: string;
+  status?: string;
+  shipping?: {
+    status?: string;
+    substatus?: string;
+    date_created?: string;
+    date_last_updated?: string;
+    shipped_at?: string;
+    delivered_at?: string;
+    estimated_delivery_time?: { date?: string };
+  };
+}) {
+  const shipping = order.shipping || {};
+  const statusJoined = [
+    String(order.status || "").toLowerCase(),
+    String(shipping.status || "").toLowerCase(),
+    String(shipping.substatus || "").toLowerCase()
+  ].join(" ");
+
+  if (
+    statusJoined.includes("shipped") ||
+    statusJoined.includes("delivered") ||
+    statusJoined.includes("in_transit")
+  ) {
+    return (
+      firstValidDate([
+        shipping.shipped_at,
+        shipping.date_last_updated,
+        shipping.date_created,
+        order.date_created
+      ]) || order.date_created || ""
+    );
+  }
+
+  return (
+    firstValidDate([
+      shipping.estimated_delivery_time?.date,
+      shipping.date_created,
+      shipping.date_last_updated,
+      order.date_created
+    ]) || order.date_created || ""
+  );
+}
+
+async function fetchShipmentDetails(shipmentId: string, accessToken: string) {
+  try {
+    return await fetchMl(`/shipments/${shipmentId}`, accessToken);
+  } catch (error) {
+    console.warn("[ml-sync] /shipments/{id} falhou", {
+      shipmentId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return null;
+  }
+}
+
+async function attachShipmentsToOrders(
+  orders: Array<{
+    id?: number;
+    date_created?: string;
+    status?: string;
+    shipping?: {
+      id?: number | string;
+      status?: string;
+      substatus?: string;
+      date_created?: string;
+      date_last_updated?: string;
+      shipped_at?: string;
+      delivered_at?: string;
+      estimated_delivery_time?: { date?: string };
+    };
+    shipping_date_resolved?: string;
+  }>,
+  accessToken: string
+) {
+  const shipmentIds = new Set<string>();
+  for (const order of orders) {
+    const id = String(order.shipping?.id || "").trim();
+    if (id) shipmentIds.add(id);
+  }
+
+  if (shipmentIds.size === 0) {
+    for (const order of orders) {
+      order.shipping_date_resolved = resolveShippingDate(order);
+    }
+    return;
+  }
+
+  const shipmentMap = new Map<string, unknown>();
+  const ids = [...shipmentIds];
+  const concurrency = 8;
+  for (let i = 0; i < ids.length; i += concurrency) {
+    const chunk = ids.slice(i, i + concurrency);
+    const rows = await Promise.all(
+      chunk.map(async (shipmentId) => ({
+        shipmentId,
+        details: await fetchShipmentDetails(shipmentId, accessToken)
+      }))
+    );
+    for (const row of rows) {
+      if (row.details) shipmentMap.set(row.shipmentId, row.details);
+    }
+  }
+
+  for (const order of orders) {
+    const shipmentId = String(order.shipping?.id || "").trim();
+    const details = shipmentId ? shipmentMap.get(shipmentId) : null;
+    if (details && typeof details === "object") {
+      order.shipping = {
+        ...(order.shipping || {}),
+        ...(details as Record<string, unknown>)
+      } as {
+        id?: number | string;
+        status?: string;
+        substatus?: string;
+        date_created?: string;
+        date_last_updated?: string;
+        shipped_at?: string;
+        delivered_at?: string;
+        estimated_delivery_time?: { date?: string };
+      };
+    }
+    order.shipping_date_resolved = resolveShippingDate(order);
+  }
+
+  console.log("[ml-sync] resumo remessas", {
+    orders: orders.length,
+    shipmentIds: shipmentIds.size,
+    enriched: shipmentMap.size
+  });
+}
+
 async function fetchOrderPayments(orderId: number, accessToken: string) {
   try {
     const payments = await fetchMl(`/orders/${orderId}/payments`, accessToken);
@@ -188,6 +338,7 @@ serve(async (req) => {
       new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const toDate = String(payload?.to_date || "").trim();
     const includePaymentsDetails = Boolean(payload?.include_payments_details);
+    const includeShipmentsDetails = Boolean(payload?.include_shipments_details);
     const requestedMaxPages = Number(payload?.max_pages) || 0;
 
     if (!accessToken) {
@@ -271,10 +422,50 @@ serve(async (req) => {
       await attachPaymentsToOrders(enrichedOrders, accessToken);
     }
 
+    if (includeShipmentsDetails) {
+      await attachShipmentsToOrders(
+        enrichedOrders as Array<{
+          id?: number;
+          date_created?: string;
+          status?: string;
+          shipping?: {
+            id?: number | string;
+            status?: string;
+            substatus?: string;
+            date_created?: string;
+            date_last_updated?: string;
+            shipped_at?: string;
+            delivered_at?: string;
+            estimated_delivery_time?: { date?: string };
+          };
+          shipping_date_resolved?: string;
+        }>,
+        accessToken
+      );
+    } else {
+      for (const order of enrichedOrders as Array<{
+        date_created?: string;
+        status?: string;
+        shipping?: {
+          status?: string;
+          substatus?: string;
+          date_created?: string;
+          date_last_updated?: string;
+          shipped_at?: string;
+          delivered_at?: string;
+          estimated_delivery_time?: { date?: string };
+        };
+        shipping_date_resolved?: string;
+      }>) {
+        order.shipping_date_resolved = resolveShippingDate(order);
+      }
+    }
+
     console.log("[ml-sync] fim", {
       sellerId,
       orders: enrichedOrders.length,
-      includePaymentsDetails
+      includePaymentsDetails,
+      includeShipmentsDetails
     });
 
     return jsonResponse({
