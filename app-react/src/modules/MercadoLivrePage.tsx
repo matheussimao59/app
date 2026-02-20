@@ -129,6 +129,8 @@ const PERIODS = [
 
 const DEFAULT_CUSTOMIZATION_TEMPLATE =
   "Ola! Obrigado pela compra. Para iniciar a personalizacao, envie: nome/texto, tema/cores e detalhes do pedido.";
+const AUTO_SYNC_MAX_PAGES = 80;
+const MANUAL_SYNC_MAX_PAGES = 200;
 
 function getRangeByPeriod(days: number) {
   const now = new Date();
@@ -422,7 +424,14 @@ function computeStats(
     const paid = Number(order.paid_amount) || 0;
     const fee = calcOrderFee(order, total, paid, fallbackRule);
     const taxes = calcOrderTaxes(order);
-    const shipping = calcOrderShipping(order);
+    let shipping = calcOrderShipping(order);
+    const totalDiscount = Math.max(total - paid, 0);
+    const knownDiscount = Math.max(fee + taxes + shipping, 0);
+    // Alguns pedidos do ML nao trazem shipping_cost detalhado, mas trazem total x pago.
+    // Nesse caso, usa o saldo restante como frete do vendedor.
+    if (totalDiscount > 0 && knownDiscount + 0.01 < totalDiscount) {
+      shipping += totalDiscount - knownDiscount;
+    }
     const isCancelled = String(order.status || "").toLowerCase().includes("cancel");
     const items = order.order_items || [];
     let rowQty = 0;
@@ -1178,11 +1187,12 @@ export function MercadoLivrePage() {
           access_token: token,
           from_date: fromDate,
           to_date: toDate,
-          include_payments_details: !silent
+          include_payments_details: !silent,
+          max_pages: silent ? AUTO_SYNC_MAX_PAGES : MANUAL_SYNC_MAX_PAGES
         }
       });
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("timeout_sync")), 15000)
+        setTimeout(() => reject(new Error("timeout_sync")), silent ? 20000 : 45000)
       );
       const { data, error } = (await Promise.race([invokePromise, timeoutPromise])) as {
         data: unknown;
@@ -1321,7 +1331,8 @@ export function MercadoLivrePage() {
             access_token: token,
             from_date: fromDate,
             to_date: toDate,
-            include_payments_details: false
+            include_payments_details: false,
+            max_pages: MANUAL_SYNC_MAX_PAGES
           }
         }
       );

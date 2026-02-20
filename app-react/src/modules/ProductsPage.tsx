@@ -167,6 +167,7 @@ export function ProductsPage() {
 
   const [editMode, setEditMode] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [editStatus, setEditStatus] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editPrice, setEditPrice] = useState(0);
@@ -514,6 +515,56 @@ export function ProductsPage() {
     setEditMode(false);
   }
 
+  async function duplicateSelectedProduct() {
+    if (!supabase || !selected) {
+      setEditStatus("Supabase nao configurado.");
+      return;
+    }
+
+    setDuplicating(true);
+    setEditStatus(null);
+
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    const userId = authData.user?.id;
+    if (authError || !userId) {
+      setEditStatus("Usuario nao autenticado para duplicar.");
+      setDuplicating(false);
+      return;
+    }
+
+    const cloneNameBase = (selected.product_name || "Produto").trim() || "Produto";
+    const cloneName = `${cloneNameBase} (copia)`;
+
+    const payload = {
+      user_id: userId,
+      product_name: cloneName,
+      product_image_data: selected.product_image_data || null,
+      selling_price: Number(selected.selling_price) || 0,
+      base_cost: Number(selected.base_cost) || 0,
+      final_margin: Number(selected.final_margin) || 0,
+      materials_json: parseJson(selected.materials_json)
+    };
+
+    const { data: inserted, error: insertError } = await supabase
+      .from("pricing_products")
+      .insert(payload)
+      .select("*")
+      .single();
+
+    if (insertError || !inserted) {
+      setEditStatus(`Erro ao duplicar: ${insertError?.message || "falha ao criar copia"}`);
+      setDuplicating(false);
+      return;
+    }
+
+    const cloned = inserted as ProductRow;
+    setItems((prev) => [cloned, ...prev]);
+    setSelected(cloned);
+    startEdit(cloned);
+    setEditStatus("Anuncio duplicado. Agora edite e salve as informacoes.");
+    setDuplicating(false);
+  }
+
   function updateEditMaterial(
     id: string,
     field: "name" | "qty" | "unit_cost",
@@ -646,6 +697,11 @@ export function ProductsPage() {
             <div className="product-modal-head">
               <h3>{selected.product_name || "Produto"}</h3>
               <div className="materials-actions-cell">
+                {!editMode && (
+                  <button type="button" className="ghost-btn" onClick={() => void duplicateSelectedProduct()} disabled={duplicating}>
+                    {duplicating ? "Duplicando..." : "Duplicar anuncio"}
+                  </button>
+                )}
                 {!editMode && (
                   <button type="button" className="ghost-btn" onClick={() => startEdit(selected)}>
                     Editar

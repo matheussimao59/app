@@ -27,7 +27,7 @@ export function App() {
             <Route path="produtos" element={<ProductsPage />} />
             <Route path="mercado-livre" element={<MercadoLivrePage />} />
             <Route path="mercado-livre/mensagens" element={<MercadoLivreMensagensPage />} />
-            <Route path="mercado-livre/separacao" element={<MercadoLivreSeparacaoPage />} />
+            <Route path="mercado-livre/separacao-producao" element={<MercadoLivreSeparacaoPage />} />
             {isLocalNfEnabled && <Route path="nota-fiscal" element={<NotaFiscalPage />} />}
             <Route path="teste-impressao" element={<TesteImpressaoPage />} />
             <Route path="configuracoes" element={<SettingsPage />} />

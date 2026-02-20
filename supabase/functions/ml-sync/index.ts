@@ -359,7 +359,7 @@ serve(async (req) => {
     const allOrders: unknown[] = [];
     const limit = 50;
     let offset = 0;
-    const maxPages = Math.max(1, Math.min(100, requestedMaxPages || 60));
+    const maxPages = Math.max(1, Math.min(500, requestedMaxPages || 120));
 
     for (let page = 0; page < maxPages; page += 1) {
       const query = new URLSearchParams({

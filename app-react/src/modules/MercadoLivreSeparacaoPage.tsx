@@ -1,69 +1,48 @@
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../lib/supabase";
+﻿import { useMemo, useState } from "react";
 
-type OrderItem = {
-  title?: string;
-  quantity?: number;
-  unit_price?: number;
-  seller_sku?: string;
-  thumbnail?: string;
+type ImportedRow = {
+  rowId: string;
+  orderId: string;
+  adName: string;
+  productQty: number;
+  sku: string;
+  buyer: string;
+  saleDate: string;
 };
 
-type Order = {
-  id: number;
-  date_created?: string;
-  shipping_date_resolved?: string;
-  status?: string;
-  shipping?: {
-    id?: number;
-    status?: string;
-    substatus?: string;
-    date_created?: string;
-    date_last_updated?: string;
-    shipped_at?: string;
-    delivered_at?: string;
-    estimated_delivery_time?: {
-      date?: string;
-    };
+type GroupedRow = {
+  key: string;
+  productName: string;
+  perAdUnits: number;
+  cartQty: number;
+  productionQty: number;
+  ordersCount: number;
+  sku: string;
+};
+
+type SheetJsModule = {
+  read: (data: ArrayBuffer, options: { type: "array" }) => {
+    SheetNames: string[];
+    Sheets: Record<string, unknown>;
   };
-  total_amount?: number;
-  buyer?: {
-    nickname?: string;
-    first_name?: string;
-    last_name?: string;
+  utils: {
+    sheet_to_json: (sheet: unknown, options: { header: 1; defval: string | number }) => unknown[][];
   };
-  order_items?: Array<{
-    item?: OrderItem;
-    quantity?: number;
-    unit_price?: number;
-  }>;
 };
 
-type SyncResponse = {
-  orders?: Order[];
-};
-
-type SeparationMode = "today_send" | "future_send" | "past_sent";
-
-function tokenSettingId(userId: string) {
-  return `ml_access_token_${userId}`;
-}
-
-function ordersCacheKey(userId: string) {
-  return `ml_orders_cache_${userId}`;
-}
-
-function fmtMoney(value: number) {
-  return (Number(value) || 0).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL"
-  });
+function normalizeKey(text?: string) {
+  return String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function fmtDate(value?: string) {
   if (!value) return "-";
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "-";
+  if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleString("pt-BR", {
     day: "2-digit",
     month: "2-digit",
@@ -72,392 +51,326 @@ function fmtDate(value?: string) {
   });
 }
 
-function normalizeStatus(status?: string) {
-  return String(status || "").toLowerCase();
-}
+function extractUnitsFromTitle(title?: string) {
+  const text = String(title || "");
+  if (!text) return 1;
 
-function joinedStatus(order: Order) {
-  return [
-    normalizeStatus(order.status),
-    normalizeStatus(order.shipping?.status),
-    normalizeStatus(order.shipping?.substatus)
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
+  const patterns = [
+    /\bc\s*\/\s*(\d{1,4})\s*und\b/i,
+    /\bc\s*\/\s*(\d{1,4})\b/i,
+    /\b(\d{1,4})\s*und\b/i,
+    /\bkit\s*(\d{1,4})\s*un\b/i
+  ];
 
-function isCancelledStatus(order: Order) {
-  return joinedStatus(order).includes("cancel");
-}
-
-function isSentStatus(order: Order) {
-  const s = joinedStatus(order);
-  return (
-    s.includes("shipped") ||
-    s.includes("delivered") ||
-    s.includes("in_transit") ||
-    s.includes("not_delivered") ||
-    s.includes("ready_for_pickup")
-  );
-}
-
-function toDateKey(value?: string) {
-  if (!value) return "";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "";
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function resolveShippingDate(order: Order) {
-  if (order.shipping_date_resolved) {
-    return order.shipping_date_resolved;
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const parsed = Number(match[1]);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
   }
 
-  const shipping = order.shipping;
-  const status = joinedStatus(order);
+  return 1;
+}
 
-  // Para enviados, prioriza datas reais de envio/atualizacao de remessa.
-  if (status.includes("shipped") || status.includes("delivered") || status.includes("in_transit")) {
-    return (
-      shipping?.shipped_at ||
-      shipping?.date_last_updated ||
-      shipping?.date_created ||
-      order.date_created ||
-      ""
-    );
+function cleanProductName(title?: string) {
+  let text = String(title || "").trim();
+  if (!text) return "Produto sem titulo";
+
+  text = text
+    .replace(/\s*[-–]\s*c\s*\/\s*\d+\s*und\s*$/i, "")
+    .replace(/\s*\(\s*c\s*\/\s*\d+\s*und\s*\)\s*$/i, "")
+    .replace(/\s*[-–]\s*\d+\s*und\s*$/i, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  return text || String(title || "Produto sem titulo");
+}
+
+function valueAsNumber(value: unknown) {
+  const raw = String(value ?? "")
+    .replace(/\./g, "")
+    .replace(",", ".")
+    .trim();
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function guessColumnIndex(headers: string[], aliases: string[]) {
+  const normalizedHeaders = headers.map((h) => normalizeKey(h));
+  for (const alias of aliases) {
+    const idx = normalizedHeaders.findIndex((h) => h.includes(alias));
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+async function loadSheetJs(): Promise<SheetJsModule> {
+  const remoteUrl = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm";
+  const mod = await import(/* @vite-ignore */ remoteUrl);
+  return mod as unknown as SheetJsModule;
+}
+
+function parseRowsFromGrid(grid: unknown[][]): ImportedRow[] {
+  if (!grid.length) return [];
+
+  const headerRow = (grid[0] || []).map((h) => String(h || "").trim());
+
+  const idxOrderId = guessColumnIndex(headerRow, ["pedido", "order", "numero do pedido", "n do pedido"]);
+  const idxAdName = guessColumnIndex(headerRow, ["nome do anuncio", "titulo", "anuncio", "item title"]);
+  const idxQty = guessColumnIndex(headerRow, ["qtd do produto", "quantidade", "qty", "qtd"]);
+  const idxSku = guessColumnIndex(headerRow, ["sku", "seller sku", "seller_sku"]);
+  const idxBuyer = guessColumnIndex(headerRow, ["comprador", "cliente", "buyer"]);
+  const idxDate = guessColumnIndex(headerRow, ["data", "date", "data da venda", "sale date"]);
+
+  if (idxAdName < 0 || idxQty < 0) {
+    throw new Error("Colunas obrigatorias nao encontradas. Precisa ter: Nome do Anuncio e Qtd. do Produto.");
   }
 
-  // Para nao enviados, usa data prevista de entrega quando existir (mais proxima de "data de envio"),
-  // depois datas da remessa, e por ultimo data da compra.
-  return (
-    shipping?.estimated_delivery_time?.date ||
-    shipping?.date_created ||
-    shipping?.date_last_updated ||
-    order.date_created ||
-    ""
-  );
-}
+  const rows: ImportedRow[] = [];
+  for (let i = 1; i < grid.length; i += 1) {
+    const row = grid[i] || [];
+    const adName = String(row[idxAdName] || "").trim();
+    if (!adName) continue;
 
-function toDateLabel(dateKey: string) {
-  if (!dateKey) return "-";
-  const [year, month, day] = dateKey.split("-");
-  return `${day}/${month}/${year}`;
-}
+    const qty = Math.max(1, Math.floor(valueAsNumber(row[idxQty]) || 1));
 
-function orderSummary(order: Order) {
-  const first = order.order_items?.[0];
-  const item = first?.item;
-  return {
-    title: item?.title || "Produto sem titulo",
-    qty: Number(first?.quantity ?? item?.quantity) || 0,
-    sku: item?.seller_sku || "-",
-    amount: Number(order.total_amount) || 0,
-    buyer:
-      order.buyer?.nickname ||
-      [order.buyer?.first_name, order.buyer?.last_name].filter(Boolean).join(" ") ||
-      "Cliente"
-  };
+    rows.push({
+      rowId: `${i}-${Math.random().toString(36).slice(2, 8)}`,
+      orderId: idxOrderId >= 0 ? String(row[idxOrderId] || "-").trim() || "-" : "-",
+      adName,
+      productQty: qty,
+      sku: idxSku >= 0 ? String(row[idxSku] || "-").trim() || "-" : "-",
+      buyer: idxBuyer >= 0 ? String(row[idxBuyer] || "-").trim() || "-" : "-",
+      saleDate: idxDate >= 0 ? String(row[idxDate] || "").trim() : ""
+    });
+  }
+
+  return rows;
 }
 
 export function MercadoLivreSeparacaoPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState<ImportedRow[]>([]);
+  const [loadingFile, setLoadingFile] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date().toISOString()));
-  const [mode, setMode] = useState<SeparationMode>("today_send");
+  const [fileName, setFileName] = useState("");
 
-  useEffect(() => {
-    let mounted = true;
+  async function importFile(file: File | null) {
+    if (!file) return;
 
-    async function loadOrders() {
-      if (!supabase) {
-        setError("Supabase nao configurado.");
-        setLoading(false);
-        return;
+    setLoadingFile(true);
+    setError(null);
+
+    try {
+      const isXlsx = file.name.toLowerCase().endsWith(".xlsx") || file.type.includes("sheet");
+      if (!isXlsx) {
+        throw new Error("Arquivo invalido. Envie um arquivo .xlsx exportado da lista de pedidos.");
       }
 
-      const { data } = await supabase.auth.getUser();
-      const uid = data.user?.id || null;
-      if (!uid) {
-        if (!mounted) return;
-        setError("Usuario nao autenticado.");
-        setLoading(false);
-        return;
-      }
-      setUserId(uid);
+      const buffer = await file.arrayBuffer();
+      const XLSX = await loadSheetJs();
+      const wb = XLSX.read(buffer, { type: "array" });
+      const firstSheetName = wb.SheetNames[0];
+      if (!firstSheetName) throw new Error("Arquivo sem planilha.");
 
-      let loadedOrders: Order[] = [];
-      try {
-        const { data: tokenRow } = await supabase
-          .from("app_settings")
-          .select("config_data")
-          .eq("id", tokenSettingId(uid))
-          .maybeSingle();
-        const accessToken = String(tokenRow?.config_data?.access_token || "").trim();
-
-        if (accessToken) {
-          const fromDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
-          const toDate = new Date().toISOString();
-          const { data: syncPayload, error: syncError } = await supabase.functions.invoke("ml-sync", {
-            body: {
-              access_token: accessToken,
-              from_date: fromDate,
-              to_date: toDate,
-              include_payments_details: false,
-              include_shipments_details: true,
-              max_pages: 100
-            }
-          });
-          if (!syncError) {
-            loadedOrders = (((syncPayload || {}) as SyncResponse).orders || []) as Order[];
-            localStorage.setItem(ordersCacheKey(uid), JSON.stringify(loadedOrders));
-          }
-        }
-      } catch {
-        // fallback local cache below
+      const firstSheet = wb.Sheets[firstSheetName];
+      const grid = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: "" });
+      const parsed = parseRowsFromGrid(grid);
+      if (parsed.length === 0) {
+        throw new Error("Nenhum pedido valido encontrado na planilha.");
       }
 
-      if (loadedOrders.length === 0) {
-        try {
-          const raw = localStorage.getItem(ordersCacheKey(uid));
-          const parsed = raw ? (JSON.parse(raw) as Order[]) : [];
-          loadedOrders = Array.isArray(parsed) ? parsed : [];
-        } catch {
-          loadedOrders = [];
-        }
-      }
-
-      if (!mounted) return;
-      setOrders(loadedOrders);
-      setLoading(false);
+      setRows(parsed);
+      setFileName(file.name);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Falha ao importar arquivo.";
+      setError(message);
+      setRows([]);
+      setFileName("");
+    } finally {
+      setLoadingFile(false);
     }
+  }
 
-    void loadOrders();
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const grouped = useMemo(() => {
+    const map = new Map<string, GroupedRow>();
 
-  const todayKey = useMemo(() => toDateKey(new Date().toISOString()), []);
+    for (const row of rows) {
+      const perAdUnits = extractUnitsFromTitle(row.adName);
+      const productName = cleanProductName(row.adName);
+      const key = normalizeKey(productName);
+      const current = map.get(key) || {
+        key,
+        productName,
+        perAdUnits,
+        cartQty: 0,
+        productionQty: 0,
+        ordersCount: 0,
+        sku: row.sku
+      };
 
-  const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
-      if (isCancelledStatus(order)) return false;
-      const dateKey = toDateKey(resolveShippingDate(order));
-      if (!dateKey) return false;
-
-      if (mode === "today_send") {
-        // "Hoje" como fila de expedicao do dia: inclui atrasados nao enviados.
-        return !isSentStatus(order) && dateKey <= todayKey;
-      }
-      if (mode === "future_send") {
-        return !isSentStatus(order) && dateKey > todayKey;
-      }
-      return isSentStatus(order) && dateKey < todayKey;
-    });
-  }, [orders, mode, todayKey]);
-
-  const modeCounts = useMemo(() => {
-    const counts = {
-      today_send: 0,
-      future_send: 0,
-      past_sent: 0
-    };
-    for (const order of orders) {
-      if (isCancelledStatus(order)) continue;
-      const dateKey = toDateKey(resolveShippingDate(order));
-      if (!dateKey) continue;
-      if (!isSentStatus(order) && dateKey <= todayKey) counts.today_send += 1;
-      else if (!isSentStatus(order) && dateKey > todayKey) counts.future_send += 1;
-      else if (isSentStatus(order) && dateKey < todayKey) counts.past_sent += 1;
-    }
-    return counts;
-  }, [orders, todayKey]);
-
-  const groupedByDate = useMemo(() => {
-    const map = new Map<string, Order[]>();
-    for (const order of filteredOrders) {
-      const key = toDateKey(order.date_created);
-      if (!key) continue;
-      const current = map.get(key) || [];
-      current.push(order);
+      current.cartQty += row.productQty;
+      current.productionQty += row.productQty * perAdUnits;
+      current.ordersCount += 1;
+      if (current.sku === "-" && row.sku !== "-") current.sku = row.sku;
       map.set(key, current);
     }
-    return [...map.entries()]
-      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-      .map(([dateKey, list]) => ({
-        dateKey,
-        label: toDateLabel(dateKey),
-        orders: list.sort((x, y) => (x.id < y.id ? 1 : -1)),
-        count: list.length,
-        amount: list.reduce((acc, o) => acc + (Number(o.total_amount) || 0), 0)
-      }));
-  }, [filteredOrders]);
 
-  const selectedGroup = useMemo(() => {
-    return groupedByDate.find((g) => g.dateKey === selectedDate) || null;
-  }, [groupedByDate, selectedDate]);
+    return [...map.values()].sort((a, b) => b.productionQty - a.productionQty);
+  }, [rows]);
 
-  useEffect(() => {
-    if (!selectedGroup && groupedByDate.length > 0) {
-      setSelectedDate(groupedByDate[0].dateKey);
-    }
-  }, [groupedByDate, selectedGroup]);
-
-  const modeTitle =
-    mode === "today_send"
-      ? "Hoje para envio"
-      : mode === "future_send"
-        ? "Futuro para envio"
-        : "Datas passadas enviadas";
+  const totals = useMemo(() => {
+    const cartQty = grouped.reduce((acc, item) => acc + item.cartQty, 0);
+    const productionQty = grouped.reduce((acc, item) => acc + item.productionQty, 0);
+    return {
+      importedOrders: rows.length,
+      groupedProducts: grouped.length,
+      cartQty,
+      productionQty
+    };
+  }, [grouped, rows.length]);
 
   return (
     <section className="page">
       <div className="section-head row-between">
         <div>
-          <h2>Separacao de Pedidos</h2>
-          <p className="page-text">Pedidos agrupados por data de envio (shipping), com fallback para data da compra.</p>
-        </div>
-        <div className="products-head" style={{ marginBottom: 0 }}>
-          <input
-            className="products-search"
-            type="date"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-          />
+          <h2>Separacao de Producao</h2>
+          <p className="page-text">
+            Importe a planilha .xlsx de pedidos e o sistema calcula automaticamente o total a produzir por produto.
+          </p>
         </div>
       </div>
 
-      {loading && (
-        <div className="loading-indicator centered" role="status" aria-live="polite">
-          <span className="loading-spinner" aria-hidden="true" />
-          <span>Carregando pedidos...</span>
+      <div className="soft-panel ml-upload-panel">
+        <p>Importar lista de pedidos (.xlsx)</p>
+        <div className="ml-upload-row">
+          <label className="primary-btn" style={{ cursor: "pointer" }}>
+            {loadingFile ? "Importando..." : "Selecionar arquivo .xlsx"}
+            <input
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              onChange={(e) => void importFile(e.target.files?.[0] || null)}
+              style={{ display: "none" }}
+              disabled={loadingFile}
+            />
+          </label>
+          {fileName && <span className="page-text">Arquivo: {fileName}</span>}
         </div>
-      )}
-      {!loading && error && <p className="error-text">{error}</p>}
+        <span className="page-text">
+          Colunas obrigatorias: <strong>Nome do Anuncio</strong> e <strong>Qtd. do Produto</strong>.
+        </span>
+        {error && <p className="error-text">{error}</p>}
+      </div>
 
-      {!loading && !error && (
-        <>
-          <div className="ml-order-filters">
-            <button
-              type="button"
-              className={`ml-order-filter-chip ${mode === "today_send" ? "active" : ""}`}
-              onClick={() => setMode("today_send")}
-            >
-              Hoje (para enviar) ({modeCounts.today_send})
-            </button>
-            <button
-              type="button"
-              className={`ml-order-filter-chip ${mode === "future_send" ? "active" : ""}`}
-              onClick={() => setMode("future_send")}
-            >
-              Futuro (para enviar) ({modeCounts.future_send})
-            </button>
-            <button
-              type="button"
-              className={`ml-order-filter-chip ${mode === "past_sent" ? "active" : ""}`}
-              onClick={() => setMode("past_sent")}
-            >
-              Passado (enviados) ({modeCounts.past_sent})
-            </button>
-          </div>
+      <div className="ml-kpi-grid ml-production-kpis">
+        <article className="kpi-card">
+          <p>Linhas importadas</p>
+          <strong>{totals.importedOrders}</strong>
+          <span>Itens lidos da planilha</span>
+        </article>
+        <article className="kpi-card">
+          <p>Produtos agrupados</p>
+          <strong>{totals.groupedProducts}</strong>
+          <span>Agrupado por nome do anuncio</span>
+        </article>
+        <article className="kpi-card">
+          <p>Qtd no carrinho</p>
+          <strong>{totals.cartQty}</strong>
+          <span>Soma da coluna Qtd. do Produto</span>
+        </article>
+        <article className="kpi-card">
+          <p>Total para produzir</p>
+          <strong>{totals.productionQty}</strong>
+          <span>C/und do anuncio x qtd comprada</span>
+        </article>
+      </div>
 
-          <div className="kpi-grid kpi-grid-4">
-            <article className="kpi-card">
-              <p>{modeTitle}</p>
-              <strong>{filteredOrders.length}</strong>
-              <span>Pedidos nesta visao</span>
-            </article>
-            <article className="kpi-card">
-              <p>Datas com envio</p>
-              <strong>{groupedByDate.length}</strong>
-              <span>Agrupadas por dia</span>
-            </article>
-            <article className="kpi-card">
-              <p>Data selecionada</p>
-              <strong>{selectedGroup?.label || "-"}</strong>
-              <span>{selectedGroup?.count || 0} pedido(s)</span>
-            </article>
-            <article className="kpi-card">
-              <p>Valor da data</p>
-              <strong>{fmtMoney(selectedGroup?.amount || 0)}</strong>
-              <span>Somatorio dos pedidos do dia</span>
-            </article>
-          </div>
-
-          <div className="soft-panel">
-            <p>Datas da visao selecionada</p>
-            {groupedByDate.length === 0 ? (
-              <span className="page-text">Nenhum pedido encontrado para esta visao.</span>
-            ) : (
-              <div className="ml-order-filters">
-                {groupedByDate.map((group) => (
-                  <button
-                    key={group.dateKey}
-                    type="button"
-                    className={`ml-order-filter-chip ${selectedDate === group.dateKey ? "active" : ""}`}
-                    onClick={() => setSelectedDate(group.dateKey)}
-                  >
-                    {group.label} ({group.count})
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="ml-orders-table-wrap">
-            <div className="ml-orders-head">
-              <h3>{modeTitle} • {selectedGroup?.label || "-"}</h3>
-              <span>{selectedGroup?.count || 0} registro(s)</span>
-            </div>
-            <div className="table-wrap">
-              <table className="table clean">
-                <thead>
-                  <tr>
-                    <th>Pedido</th>
-                    <th>Data</th>
-                    <th>Cliente</th>
-                    <th>Titulo</th>
-                    <th>SKU</th>
-                    <th>Qtde</th>
-                    <th>Valor</th>
-                    <th>Status</th>
+      <div className="ml-orders-table-wrap">
+        <div className="ml-orders-head">
+          <h3>Resumo de producao por grupo</h3>
+          <span>{grouped.length} grupo(s)</span>
+        </div>
+        <div className="table-wrap">
+          <table className="table clean">
+            <thead>
+              <tr>
+                <th>Produto (grupo)</th>
+                <th>SKU</th>
+                <th>Und por anuncio</th>
+                <th>Qtd carrinho</th>
+                <th>Total produzir</th>
+                <th>Pedidos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {grouped.length === 0 ? (
+                <tr>
+                  <td colSpan={6}>Importe um arquivo .xlsx para visualizar o agrupamento.</td>
+                </tr>
+              ) : (
+                grouped.map((group) => (
+                  <tr key={group.key}>
+                    <td className="ml-col-title">{group.productName}</td>
+                    <td>{group.sku || "-"}</td>
+                    <td>{group.perAdUnits}</td>
+                    <td>{group.cartQty}</td>
+                    <td>
+                      <strong>{group.productionQty}</strong>
+                    </td>
+                    <td>{group.ordersCount}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {!selectedGroup || selectedGroup.orders.length === 0 ? (
-                    <tr>
-                      <td colSpan={8}>Sem pedidos para a data selecionada.</td>
-                    </tr>
-                  ) : (
-                    selectedGroup.orders.map((order) => {
-                      const summary = orderSummary(order);
-                      return (
-                        <tr key={order.id}>
-                          <td className="ml-col-order-id">#{order.id}</td>
-                          <td>{fmtDate(resolveShippingDate(order))}</td>
-                          <td>{summary.buyer}</td>
-                          <td className="ml-col-title">{summary.title}</td>
-                          <td>{summary.sku}</td>
-                          <td>{summary.qty}</td>
-                          <td>{fmtMoney(summary.amount)}</td>
-                          <td>{order.status || "-"}</td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      )}
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-      {!userId && !loading && <p className="page-text">Entre na conta para visualizar os pedidos.</p>}
+      <div className="ml-orders-table-wrap">
+        <div className="ml-orders-head">
+          <h3>Detalhes importados</h3>
+          <span>{rows.length} linha(s)</span>
+        </div>
+        <div className="table-wrap">
+          <table className="table clean">
+            <thead>
+              <tr>
+                <th>Pedido</th>
+                <th>Data</th>
+                <th>Cliente</th>
+                <th>Nome do anuncio</th>
+                <th>Qtd produto</th>
+                <th>Und anuncio</th>
+                <th>Produzir</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={7}>Nenhum dado importado.</td>
+                </tr>
+              ) : (
+                rows.map((row) => {
+                  const perAdUnits = extractUnitsFromTitle(row.adName);
+                  return (
+                    <tr key={row.rowId}>
+                      <td className="ml-col-order-id">{row.orderId}</td>
+                      <td>{fmtDate(row.saleDate)}</td>
+                      <td>{row.buyer || "-"}</td>
+                      <td className="ml-col-title">{row.adName}</td>
+                      <td>{row.productQty}</td>
+                      <td>{perAdUnits}</td>
+                      <td>
+                        <strong>{row.productQty * perAdUnits}</strong>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
   );
 }
