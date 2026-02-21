@@ -59,7 +59,8 @@ function extractUnitsFromTitle(title?: string) {
     /\bc\s*\/\s*(\d{1,4})\s*und\b/i,
     /\bc\s*\/\s*(\d{1,4})\b/i,
     /\b(\d{1,4})\s*und\b/i,
-    /\bkit\s*(\d{1,4})\s*un\b/i
+    /\bkit\s*(\d{1,4})\s*un\b/i,
+    /^\s*(\d{1,4})\b/
   ];
 
   for (const pattern of patterns) {
@@ -78,6 +79,7 @@ function cleanProductName(title?: string) {
   if (!text) return "Produto sem titulo";
 
   text = text
+    .replace(/^\s*\d{1,4}\s+/, "")
     .replace(/\s*[-–]\s*c\s*\/\s*\d+\s*und\s*$/i, "")
     .replace(/\s*\(\s*c\s*\/\s*\d+\s*und\s*\)\s*$/i, "")
     .replace(/\s*[-–]\s*\d+\s*und\s*$/i, "")

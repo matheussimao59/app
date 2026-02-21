@@ -821,6 +821,14 @@ export function MercadoLivrePage() {
     const start = (currentPage - 1) * pageSize;
     return filteredLines.slice(start, start + pageSize);
   }, [filteredLines, currentPage]);
+  const totalFeeFiltered = useMemo(
+    () => filteredLines.reduce((acc, row) => acc + (Number(row.fee) || 0), 0),
+    [filteredLines]
+  );
+  const totalFeeCurrentPage = useMemo(
+    () => pagedLines.reduce((acc, row) => acc + (Number(row.fee) || 0), 0),
+    [pagedLines]
+  );
 
   useEffect(() => {
     setCurrentPage(1);
@@ -1753,29 +1761,50 @@ export function MercadoLivrePage() {
                 ))
               )}
             </tbody>
+            {pagedLines.length > 0 && (
+              <tfoot>
+                <tr>
+                  <td colSpan={7}></td>
+                  <td>
+                    <strong>{fmtMoney(totalFeeCurrentPage)}</strong>
+                    <div className="page-text" style={{ fontSize: "0.72rem" }}>Tarifa desta pagina</div>
+                  </td>
+                  <td>
+                    <strong>{fmtMoney(totalFeeFiltered)}</strong>
+                    <div className="page-text" style={{ fontSize: "0.72rem" }}>Tarifa total do filtro</div>
+                  </td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
         {filteredLines.length > pageSize && (
-          <div className="ml-pagination">
-            <button
-              type="button"
-              className="ghost-btn"
-              disabled={currentPage <= 1}
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            >
-              Anterior
-            </button>
-            <span>
-              Pagina {currentPage} de {totalPages}
-            </span>
-            <button
-              type="button"
-              className="ghost-btn"
-              disabled={currentPage >= totalPages}
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Proxima
-            </button>
+          <div>
+            <div className="ml-pagination">
+              <button
+                type="button"
+                className="ghost-btn"
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              >
+                Anterior
+              </button>
+              <span>
+                Pagina {currentPage} de {totalPages}
+              </span>
+              <button
+                type="button"
+                className="ghost-btn"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Proxima
+              </button>
+            </div>
+            <p className="page-text" style={{ textAlign: "right", marginTop: 6 }}>
+              Tarifa total (todas as paginas): <strong>{fmtMoney(totalFeeFiltered)}</strong>
+            </p>
           </div>
         )}
       </div>
