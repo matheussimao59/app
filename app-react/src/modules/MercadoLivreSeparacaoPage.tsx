@@ -200,7 +200,7 @@ export function MercadoLivreSeparacaoPage() {
     for (const row of rows) {
       const perAdUnits = extractUnitsFromTitle(row.adName);
       const productName = cleanProductName(row.adName);
-      const key = normalizeKey(productName);
+      const key = `${normalizeKey(productName)}__pack_${perAdUnits}`;
       const current = map.get(key) || {
         key,
         productName,
@@ -312,7 +312,12 @@ export function MercadoLivreSeparacaoPage() {
               ) : (
                 grouped.map((group) => (
                   <tr key={group.key}>
-                    <td className="ml-col-title">{group.productName}</td>
+                    <td className="ml-col-title">
+                      {group.productName}
+                      <div className="page-text" style={{ fontSize: "0.72rem" }}>
+                        Grupo: {group.perAdUnits} un por anuncio
+                      </div>
+                    </td>
                     <td>{group.sku || "-"}</td>
                     <td>{group.perAdUnits}</td>
                     <td>{group.cartQty}</td>
