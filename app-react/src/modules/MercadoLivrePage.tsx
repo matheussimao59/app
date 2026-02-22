@@ -1195,18 +1195,18 @@ export function MercadoLivrePage() {
       if (!supabase) {
         throw new Error("Supabase nao configurado para sincronizar.");
       }
-
+      const includePaymentsDetails = !silent;
       const invokePromise = supabase.functions.invoke("ml-sync", {
         body: {
           access_token: token,
           from_date: fromDate,
           to_date: toDate,
-          include_payments_details: true,
-          max_pages: silent ? AUTO_SYNC_MAX_PAGES : MANUAL_SYNC_MAX_PAGES
+          include_payments_details: includePaymentsDetails,
+          max_pages: silent ? Math.min(AUTO_SYNC_MAX_PAGES, 40) : MANUAL_SYNC_MAX_PAGES
         }
       });
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("timeout_sync")), silent ? 20000 : 45000)
+        setTimeout(() => reject(new Error("timeout_sync")), silent ? 20000 : 50000)
       );
       const { data, error } = (await Promise.race([invokePromise, timeoutPromise])) as {
         data: unknown;
@@ -1217,7 +1217,7 @@ export function MercadoLivrePage() {
       const payload = (data || {}) as SyncResponse;
       if (!payload?.seller) throw new Error("Resposta invalida da funcao ml-sync.");
 
-      setSeller(payload.seller);
+      setSeller(payload.seller || null);
       setOrders(payload.orders || []);
       const syncedAt = new Date().toISOString();
       setLastSyncAt(syncedAt);
@@ -1242,9 +1242,7 @@ export function MercadoLivrePage() {
         normalizedMessage.includes("FunctionsFetchError")
           ? " Verifique se a funcao `ml-sync` foi deployada no Supabase."
           : "";
-      if (!silent) {
-        setSyncError(`Nao foi possivel sincronizar. Verifique token/permissoes. Detalhe: ${normalizedMessage}.${hint}`);
-      }
+      setSyncError(`Nao foi possivel sincronizar. Verifique token/permissoes. Detalhe: ${normalizedMessage}.${hint}`);
     } finally {
       setLoading(false);
       setBackgroundSyncing(false);
@@ -1345,7 +1343,7 @@ export function MercadoLivrePage() {
             access_token: token,
             from_date: fromDate,
             to_date: toDate,
-            include_payments_details: true,
+            include_payments_details: false,
             max_pages: MANUAL_SYNC_MAX_PAGES
           }
         }
