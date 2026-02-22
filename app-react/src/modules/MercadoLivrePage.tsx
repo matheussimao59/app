@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 
 type SellerProfile = {
@@ -127,6 +127,7 @@ const DEFAULT_CUSTOMIZATION_TEMPLATE =
   "Ola! Obrigado pela compra. Para iniciar a personalizacao, envie: nome/texto, tema/cores e detalhes do pedido.";
 const AUTO_SYNC_MAX_PAGES = 80;
 const MANUAL_SYNC_MAX_PAGES = 200;
+const DEBUG_AUDIT_ORDER_ID = "2000015241130256";
 
 function getRangeByPeriod(days: number) {
   const now = new Date();
@@ -227,23 +228,34 @@ function orderItemThumb(order: Order) {
 }
 
 function calcPaymentFee(payment: NonNullable<Order["payments"]>[number]) {
-  const direct =
-    Number(payment.marketplace_fee) || Number(payment.fee_amount) || 0;
+  const feeDetails = payment.fee_details || [];
+  if (feeDetails.length > 0) {
+    const feeByType = feeDetails
+      .filter((d) => {
+        const type = String(d.type || "").toLowerCase();
+        if (!type) return false;
+        if (type.includes("shipping") || type.includes("freight") || type.includes("envio")) return false;
+        if (type.includes("tax")) return false;
+        return true;
+      })
+      .reduce((acc, d) => acc + Math.abs(Number(d.amount) || 0), 0);
+    if (feeByType > 0) return feeByType;
+  }
+
+  // `fee_amount` pode vir agregado com outras cobrancas (ex.: envio).
+  // Prioriza apenas campo especifico de tarifa do marketplace.
+  const direct = Number(payment.marketplace_fee) || 0;
   if (direct > 0) return direct;
 
   const chargeFee = (payment.charges_details || [])
-    .filter((c) => String(c.name || "").toLowerCase().includes("fee"))
+    .filter((c) => {
+      const name = String(c.name || "").toLowerCase();
+      if (!name.includes("fee") && !name.includes("tarifa")) return false;
+      if (name.includes("envio") || name.includes("frete") || name.includes("shipping")) return false;
+      return true;
+    })
     .reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
   if (chargeFee > 0) return chargeFee;
-
-  const feeDetail = (payment.fee_details || [])
-    .reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
-  if (feeDetail > 0) return feeDetail;
-
-  const transactionAmount = Number(payment.transaction_amount) || 0;
-  const totalPaidAmount = Number(payment.total_paid_amount) || 0;
-  const diff = Math.max(transactionAmount - totalPaidAmount, 0);
-  if (diff > 0) return diff;
 
   return 0;
 }
@@ -289,26 +301,31 @@ function calcOrderTaxes(order: Order) {
 }
 
 function calcPaymentShippingSeller(payment: NonNullable<Order["payments"]>[number]) {
-  const names = (payment.charges_details || [])
-    .map((c) => String(c.name || "").toLowerCase())
-    .filter(Boolean);
+  const shippingByFeeType = (payment.fee_details || [])
+    .filter((d) => {
+      const type = String(d.type || "").toLowerCase();
+      return type.includes("shipping") || type.includes("freight") || type.includes("envio");
+    })
+    .reduce((acc, d) => acc + Math.abs(Number(d.amount) || 0), 0);
+  if (shippingByFeeType > 0) return shippingByFeeType;
 
-  const hasShippingLine = names.some((name) => /mercado envios|envio|frete|ship/.test(name));
-  const buyerPaysHint = names.some((name) => /comprador|buyer|por conta do comprador/.test(name));
-  const sellerPaysHint = names.some((name) =>
-    /vendedor|seller|por sua conta|sua conta|por conta do vendedor/.test(name)
-  );
+  let shippingByExplicitSellerCharge = 0;
+  for (const charge of payment.charges_details || []) {
+    const name = String(charge.name || "").toLowerCase();
+    const amount = Number(charge.amount) || 0;
+    const hasShipping = /mercado envios|envio|frete|ship/.test(name);
+    const buyerHint = /comprador|buyer|por conta do comprador/.test(name);
+    const sellerHint = /vendedor|seller|por sua conta|sua conta|por conta do vendedor/.test(name);
+    if (!hasShipping) continue;
+    if (buyerHint && !sellerHint) continue;
+    if (sellerHint || amount < 0) {
+      shippingByExplicitSellerCharge += Math.abs(amount);
+    }
+  }
+  if (shippingByExplicitSellerCharge > 0) return shippingByExplicitSellerCharge;
 
-  const shippingByCharges = (payment.charges_details || [])
-    .filter((c) => /mercado envios|envio|frete|ship/i.test(String(c.name || "")))
-    .reduce((acc, c) => acc + Math.abs(Number(c.amount) || 0), 0);
-
-  if (buyerPaysHint && !sellerPaysHint) return 0;
-  if (shippingByCharges > 0 && sellerPaysHint) return shippingByCharges;
-  if (hasShippingLine && !sellerPaysHint) return 0;
-
-  const raw = Math.abs(Number(payment.shipping_cost) || 0);
-  return raw;
+  // Nao usar shipping_cost genérico sem confirmação: pode ser frete do comprador.
+  return 0;
 }
 
 function calcOrderShipping(order: Order) {
@@ -318,19 +335,8 @@ function calcOrderShipping(order: Order) {
     if (String(p.status || "").toLowerCase() === "cancelled") continue;
     shippingByPayments += calcPaymentShippingSeller(p);
   }
-
-  const shippingRaw = Math.abs(Number(order.shipping_cost) || 0);
-  const shippingAny = order as unknown as {
-    shipping?: { payer_id?: string | number; cost_type?: string; logistic_type?: string };
-  };
-  const rootHint = [
-    String(shippingAny.shipping?.payer_id || "").toLowerCase(),
-    String(shippingAny.shipping?.cost_type || "").toLowerCase(),
-    String(shippingAny.shipping?.logistic_type || "").toLowerCase()
-  ].join(" ");
-  const buyerRootHint = /buyer|comprador/.test(rootHint);
-  const shippingRoot = buyerRootHint ? 0 : shippingRaw;
-  return shippingByPayments > 0 ? shippingByPayments : shippingRoot;
+  // So considera frete do vendedor com evidência nos pagamentos.
+  return shippingByPayments;
 }
 
 function tokenSettingId(userId: string) {
@@ -759,6 +765,13 @@ export function MercadoLivrePage() {
     }
     return map;
   }, [savedProducts]);
+  const ordersById = useMemo(() => {
+    const map = new Map<string, Order>();
+    for (const order of orders) {
+      map.set(String(order.id), order);
+    }
+    return map;
+  }, [orders]);
 
   function findMatchedProduct(line: OrderLine) {
     const skuKey = normalizeKey(line.sku);
@@ -1220,15 +1233,31 @@ export function MercadoLivrePage() {
       }
 
       let payload: SyncResponse;
+      let partialLoaded = false;
+      let optimizedLoaded = false;
       try {
         payload = await runSync(
           true,
           silent ? Math.min(AUTO_SYNC_MAX_PAGES, 25) : Math.min(MANUAL_SYNC_MAX_PAGES, 120),
           silent ? 22000 : 45000
         );
-      } catch {
-        payload = await runSync(false, 12, 15000);
-        setSyncInfo("Sincronizacao parcial carregada. Clique em 'Sincronizar agora' para buscar tarifas/frete completos.");
+      } catch (fullError) {
+        if (!silent) {
+          try {
+            payload = await runSync(true, 30, 28000);
+            optimizedLoaded = true;
+          } catch {
+            try {
+              payload = await runSync(false, 12, 15000);
+              partialLoaded = true;
+            } catch {
+              throw fullError;
+            }
+          }
+        } else {
+          payload = await runSync(false, 12, 15000);
+          partialLoaded = true;
+        }
       }
 
       setSeller(payload.seller || null);
@@ -1241,7 +1270,17 @@ export function MercadoLivrePage() {
         localStorage.setItem(lastSyncCacheKey(userId), syncedAt);
       }
       const label = PERIODS.find((p) => p.days === days)?.label || `${days} dias`;
-      setSyncInfo(silent ? `Atualizado automaticamente (${label}).` : `Dados sincronizados com sucesso (${label}).`);
+      if (partialLoaded) {
+        setSyncInfo(
+          silent
+            ? `Atualizado automaticamente (${label}) em modo parcial.`
+            : `Dados sincronizados com sucesso (${label}) em modo parcial. Clique em 'Sincronizar agora' para buscar tarifas/frete completos.`
+        );
+      } else if (optimizedLoaded) {
+        setSyncInfo(`Dados sincronizados com sucesso (${label}) em modo otimizado.`);
+      } else {
+        setSyncInfo(silent ? `Atualizado automaticamente (${label}).` : `Dados sincronizados com sucesso (${label}).`);
+      }
     } catch (error) {
       const message =
         error instanceof Error
@@ -1726,61 +1765,107 @@ export function MercadoLivrePage() {
                   <td colSpan={11}>Sem pedidos no periodo selecionado.</td>
                 </tr>
               ) : (
-                pagedLines.map((row) => (
-                  <tr key={row.id}>
-                    <td>
-                      {row.thumb || row.linkedProductImage ? (
-                        <img
-                          className="ml-thumb"
-                          src={String(row.thumb || row.linkedProductImage || "").replace(/^http:\/\//i, "https://")}
-                          alt={row.title}
-                          loading="lazy"
-                          onError={(e) => {
-                            const img = e.currentTarget;
-                            img.style.display = "none";
-                            const fallback = img.nextElementSibling as HTMLElement | null;
-                            if (fallback) fallback.style.display = "inline-flex";
-                          }}
-                        />
-                      ) : null}
-                      <span
-                        className="ml-thumb-fallback"
-                        style={{ display: row.thumb || row.linkedProductImage ? "none" : "inline-flex" }}
-                      >
-                        📦
-                      </span>
-                    </td>
-                    <td className="ml-col-order-id">#{row.id}</td>
-                    <td className="ml-col-title">{row.title}</td>
-                    <td>{row.sku}</td>
-                    <td>{row.date}</td>
-                    <td>{row.qty}</td>
-                    <td className="ml-col-money">{fmtMoney(row.amount)}</td>
-                    <td className="ml-col-money">{fmtMoney(row.fee)}</td>
-                    <td className="ml-col-money">
-                      {row.shipping > 0 ? <span className="ml-freight-pill">{fmtMoney(row.shipping)}</span> : fmtMoney(0)}
-                    </td>
-                    <td>
-                      <div className="ml-cost-cell">
-                        <strong>{fmtMoney(row.totalCost)}</strong>
-                        <select
-                          className="ml-cost-select"
-                          value={row.linkedProductId}
-                          onChange={(e) => void saveCostLink(row, e.target.value)}
-                          disabled={savingLinkKey === `${row.id}-${row.sku}-${row.title}`}
-                        >
-                          <option value="">Anexar produto...</option>
-                          {savedProducts.map((p) => (
-                            <option key={String(p.id)} value={String(p.id)}>
-                              {`${(p.product_name || "Sem nome").slice(0, 15)}${(p.product_name || "").length > 15 ? "..." : ""}`} - {fmtMoney(Number(p.base_cost) || 0)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </td>
-                    <td className={row.netProfit >= 0 ? "profit-up" : "profit-down"}>{fmtMoney(row.netProfit)}</td>
-                  </tr>
-                ))
+                pagedLines.map((row) => {
+                  const showAudit = String(row.id) === DEBUG_AUDIT_ORDER_ID;
+                  const rawOrder = ordersById.get(String(row.id));
+                  const auditPayload = showAudit
+                    ? {
+                        order_id: rawOrder?.id,
+                        status: rawOrder?.status,
+                        total_amount: rawOrder?.total_amount,
+                        paid_amount: rawOrder?.paid_amount,
+                        shipping_cost_root: rawOrder?.shipping_cost,
+                        taxes_amount_root: rawOrder?.taxes_amount,
+                        computed: {
+                          fee: row.fee,
+                          shipping: row.shipping,
+                          amount: row.amount,
+                          net_profit: row.netProfit
+                        },
+                        payments: (rawOrder?.payments || []).map((p) => ({
+                          status: p.status,
+                          marketplace_fee: p.marketplace_fee,
+                          fee_amount: p.fee_amount,
+                          shipping_cost: p.shipping_cost,
+                          taxes_amount: p.taxes_amount,
+                          transaction_amount: p.transaction_amount,
+                          total_paid_amount: p.total_paid_amount,
+                          charges_details: p.charges_details,
+                          fee_details: p.fee_details
+                        }))
+                      }
+                    : null;
+
+                  return (
+                    <Fragment key={row.id}>
+                      <tr>
+                        <td>
+                          {row.thumb || row.linkedProductImage ? (
+                            <img
+                              className="ml-thumb"
+                              src={String(row.thumb || row.linkedProductImage || "").replace(/^http:\/\//i, "https://")}
+                              alt={row.title}
+                              loading="lazy"
+                              onError={(e) => {
+                                const img = e.currentTarget;
+                                img.style.display = "none";
+                                const fallback = img.nextElementSibling as HTMLElement | null;
+                                if (fallback) fallback.style.display = "inline-flex";
+                              }}
+                            />
+                          ) : null}
+                          <span
+                            className="ml-thumb-fallback"
+                            style={{ display: row.thumb || row.linkedProductImage ? "none" : "inline-flex" }}
+                          >
+                            📦
+                          </span>
+                        </td>
+                        <td className="ml-col-order-id">#{row.id}</td>
+                        <td className="ml-col-title">{row.title}</td>
+                        <td>{row.sku}</td>
+                        <td>{row.date}</td>
+                        <td>{row.qty}</td>
+                        <td className="ml-col-money">{fmtMoney(row.amount)}</td>
+                        <td className="ml-col-money">{fmtMoney(row.fee)}</td>
+                        <td className="ml-col-money">
+                          {row.shipping > 0 ? <span className="ml-freight-pill">{fmtMoney(row.shipping)}</span> : fmtMoney(0)}
+                        </td>
+                        <td>
+                          <div className="ml-cost-cell">
+                            <strong>{fmtMoney(row.totalCost)}</strong>
+                            <select
+                              className="ml-cost-select"
+                              value={row.linkedProductId}
+                              onChange={(e) => void saveCostLink(row, e.target.value)}
+                              disabled={savingLinkKey === `${row.id}-${row.sku}-${row.title}`}
+                            >
+                              <option value="">Anexar produto...</option>
+                              {savedProducts.map((p) => (
+                                <option key={String(p.id)} value={String(p.id)}>
+                                  {`${(p.product_name || "Sem nome").slice(0, 15)}${(p.product_name || "").length > 15 ? "..." : ""}`} - {fmtMoney(Number(p.base_cost) || 0)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </td>
+                        <td className={row.netProfit >= 0 ? "profit-up" : "profit-down"}>{fmtMoney(row.netProfit)}</td>
+                      </tr>
+                      {showAudit && auditPayload && (
+                        <tr>
+                          <td colSpan={11}>
+                            <div className="soft-panel" style={{ margin: 0 }}>
+                              <p>Auditoria API (pedido {DEBUG_AUDIT_ORDER_ID})</p>
+                              <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: "0.72rem" }}>
+                                {JSON.stringify(auditPayload, null, 2)}
+                              </pre>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })
               )}
             </tbody>
             {pagedLines.length > 0 && (
