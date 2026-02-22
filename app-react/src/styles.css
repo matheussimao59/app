@@ -1522,6 +1522,38 @@ body {
   overflow-wrap: normal;
 }
 
+.ml-orders-table th,
+.ml-orders-table td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ml-orders-table .ml-col-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 260px;
+  max-width: 360px;
+}
+
+.ml-orders-table .ml-col-money {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ml-freight-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #fbbf24;
+  background: #fffbeb;
+  color: #92400e;
+  font-weight: 700;
+  font-size: 0.74rem;
+}
+
 .ml-thumb {
   width: 34px;
   height: 34px;

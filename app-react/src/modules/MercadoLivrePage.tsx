@@ -85,6 +85,7 @@ type OrderLine = {
   qty: number;
   amount: number;
   fee: number;
+  shipping: number;
   profit: number;
   status: string;
 };
@@ -289,14 +290,46 @@ function calcOrderTaxes(order: Order) {
   return taxesByPayments > 0 ? taxesByPayments : taxesRoot;
 }
 
+function calcPaymentShippingSeller(payment: NonNullable<Order["payments"]>[number]) {
+  const names = (payment.charges_details || [])
+    .map((c) => String(c.name || "").toLowerCase())
+    .filter(Boolean);
+
+  const hasShippingLine = names.some((name) => /envio|frete|ship/.test(name));
+  const buyerPaysHint = names.some((name) => /comprador|buyer|por conta do comprador/.test(name));
+  const sellerPaysHint = names.some((name) => /vendedor|seller|por sua conta|por conta do vendedor/.test(name));
+
+  const shippingByCharges = (payment.charges_details || [])
+    .filter((c) => /envio|frete|ship/i.test(String(c.name || "")))
+    .reduce((acc, c) => acc + Math.abs(Number(c.amount) || 0), 0);
+
+  if (buyerPaysHint && !sellerPaysHint) return 0;
+  if (shippingByCharges > 0 && sellerPaysHint) return shippingByCharges;
+  if (hasShippingLine && !sellerPaysHint) return 0;
+
+  const raw = Math.abs(Number(payment.shipping_cost) || 0);
+  return raw;
+}
+
 function calcOrderShipping(order: Order) {
   const payments = order.payments || [];
   let shippingByPayments = 0;
   for (const p of payments) {
     if (String(p.status || "").toLowerCase() === "cancelled") continue;
-    shippingByPayments += Number(p.shipping_cost) || 0;
+    shippingByPayments += calcPaymentShippingSeller(p);
   }
-  const shippingRoot = Number(order.shipping_cost) || 0;
+
+  const shippingRaw = Math.abs(Number(order.shipping_cost) || 0);
+  const shippingAny = order as unknown as {
+    shipping?: { payer_id?: string | number; cost_type?: string; logistic_type?: string };
+  };
+  const rootHint = [
+    String(shippingAny.shipping?.payer_id || "").toLowerCase(),
+    String(shippingAny.shipping?.cost_type || "").toLowerCase(),
+    String(shippingAny.shipping?.logistic_type || "").toLowerCase()
+  ].join(" ");
+  const buyerRootHint = /buyer|comprador/.test(rootHint);
+  const shippingRoot = buyerRootHint ? 0 : shippingRaw;
   return shippingByPayments > 0 ? shippingByPayments : shippingRoot;
 }
 
@@ -467,6 +500,7 @@ function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: To
       qty: rowQty,
       amount: total,
       fee,
+      shipping,
       profit: total - fee - taxes - shipping,
       status: normalizeStatus(order.status)
     });
@@ -752,8 +786,8 @@ export function MercadoLivrePage() {
       const product = findMatchedProduct(line);
       const unitCost = Number(product?.base_cost) || 0;
       const totalCost = unitCost * Math.max(1, Number(line.qty) || 1);
-      // Lucro real por venda: valor - tarifa ML - custo do produto
-      const netProfit = line.amount - line.fee - totalCost;
+      // Lucro real por venda: valor - tarifa ML - frete vendedor - custo do produto
+      const netProfit = line.amount - line.fee - line.shipping - totalCost;
       return {
         ...line,
         linkedProductId: product ? String(product.id) : "",
@@ -791,6 +825,14 @@ export function MercadoLivrePage() {
   );
   const totalFeeCurrentPage = useMemo(
     () => pagedLines.reduce((acc, row) => acc + (Number(row.fee) || 0), 0),
+    [pagedLines]
+  );
+  const totalShippingFiltered = useMemo(
+    () => filteredLines.reduce((acc, row) => acc + (Number(row.shipping) || 0), 0),
+    [filteredLines]
+  );
+  const totalShippingCurrentPage = useMemo(
+    () => pagedLines.reduce((acc, row) => acc + (Number(row.shipping) || 0), 0),
     [pagedLines]
   );
 
@@ -1650,7 +1692,7 @@ export function MercadoLivrePage() {
           </button>
         </div>
         <div className="table-wrap">
-          <table className="table clean">
+          <table className="table clean ml-orders-table">
             <thead>
               <tr>
                 <th>Foto</th>
@@ -1661,6 +1703,7 @@ export function MercadoLivrePage() {
                 <th>Qtde</th>
                 <th>Valor</th>
                 <th>Tarifa</th>
+                <th>Frete vendedor</th>
                 <th>Custo Produto</th>
                 <th>Lucro</th>
               </tr>
@@ -1668,7 +1711,7 @@ export function MercadoLivrePage() {
             <tbody>
               {pagedLines.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>Sem pedidos no periodo selecionado.</td>
+                  <td colSpan={11}>Sem pedidos no periodo selecionado.</td>
                 </tr>
               ) : (
                 pagedLines.map((row) => (
@@ -1700,8 +1743,11 @@ export function MercadoLivrePage() {
                     <td>{row.sku}</td>
                     <td>{row.date}</td>
                     <td>{row.qty}</td>
-                    <td>{fmtMoney(row.amount)}</td>
-                    <td>{fmtMoney(row.fee)}</td>
+                    <td className="ml-col-money">{fmtMoney(row.amount)}</td>
+                    <td className="ml-col-money">{fmtMoney(row.fee)}</td>
+                    <td className="ml-col-money">
+                      {row.shipping > 0 ? <span className="ml-freight-pill">{fmtMoney(row.shipping)}</span> : fmtMoney(0)}
+                    </td>
                     <td>
                       <div className="ml-cost-cell">
                         <strong>{fmtMoney(row.totalCost)}</strong>
@@ -1734,10 +1780,17 @@ export function MercadoLivrePage() {
                     <div className="page-text" style={{ fontSize: "0.72rem" }}>Tarifa desta pagina</div>
                   </td>
                   <td>
-                    <strong>{fmtMoney(totalFeeFiltered)}</strong>
-                    <div className="page-text" style={{ fontSize: "0.72rem" }}>Tarifa total do filtro</div>
+                    <strong>{fmtMoney(totalShippingCurrentPage)}</strong>
+                    <div className="page-text" style={{ fontSize: "0.72rem" }}>Frete desta pagina</div>
                   </td>
-                  <td></td>
+                  <td>
+                    <strong>{fmtMoney(totalFeeFiltered)}</strong>
+                    <div className="page-text" style={{ fontSize: "0.72rem" }}>Tarifa total filtro</div>
+                  </td>
+                  <td className="ml-col-money">
+                    <strong>{fmtMoney(totalShippingFiltered)}</strong>
+                    <div className="page-text" style={{ fontSize: "0.72rem" }}>Frete total filtro</div>
+                  </td>
                 </tr>
               </tfoot>
             )}
@@ -1767,7 +1820,7 @@ export function MercadoLivrePage() {
               </button>
             </div>
             <p className="page-text" style={{ textAlign: "right", marginTop: 6 }}>
-              Tarifa total (todas as paginas): <strong>{fmtMoney(totalFeeFiltered)}</strong>
+              Tarifa total (todas as paginas): <strong>{fmtMoney(totalFeeFiltered)}</strong> | Frete total (todas as paginas): <strong>{fmtMoney(totalShippingFiltered)}</strong>
             </p>
           </div>
         )}
