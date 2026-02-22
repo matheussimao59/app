@@ -274,8 +274,6 @@ function calcOrderFee(
   }
   if (feeByItems > 0) return feeByItems;
 
-  const byDiff = Math.max(total - paid, 0);
-  if (byDiff > 0) return byDiff;
   return 0;
 }
 
@@ -295,12 +293,14 @@ function calcPaymentShippingSeller(payment: NonNullable<Order["payments"]>[numbe
     .map((c) => String(c.name || "").toLowerCase())
     .filter(Boolean);
 
-  const hasShippingLine = names.some((name) => /envio|frete|ship/.test(name));
+  const hasShippingLine = names.some((name) => /mercado envios|envio|frete|ship/.test(name));
   const buyerPaysHint = names.some((name) => /comprador|buyer|por conta do comprador/.test(name));
-  const sellerPaysHint = names.some((name) => /vendedor|seller|por sua conta|por conta do vendedor/.test(name));
+  const sellerPaysHint = names.some((name) =>
+    /vendedor|seller|por sua conta|sua conta|por conta do vendedor/.test(name)
+  );
 
   const shippingByCharges = (payment.charges_details || [])
-    .filter((c) => /envio|frete|ship/i.test(String(c.name || "")))
+    .filter((c) => /mercado envios|envio|frete|ship/i.test(String(c.name || "")))
     .reduce((acc, c) => acc + Math.abs(Number(c.amount) || 0), 0);
 
   if (buyerPaysHint && !sellerPaysHint) return 0;
@@ -1195,27 +1195,41 @@ export function MercadoLivrePage() {
       if (!supabase) {
         throw new Error("Supabase nao configurado para sincronizar.");
       }
-      const includePaymentsDetails = !silent;
-      const invokePromise = supabase.functions.invoke("ml-sync", {
-        body: {
-          access_token: token,
-          from_date: fromDate,
-          to_date: toDate,
-          include_payments_details: includePaymentsDetails,
-          max_pages: silent ? Math.min(AUTO_SYNC_MAX_PAGES, 40) : MANUAL_SYNC_MAX_PAGES
-        }
-      });
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("timeout_sync")), silent ? 20000 : 50000)
-      );
-      const { data, error } = (await Promise.race([invokePromise, timeoutPromise])) as {
-        data: unknown;
-        error: { message?: string } | null;
-      };
+      const sb = supabase;
+      async function runSync(includePaymentsDetails: boolean, maxPages: number, timeoutMs: number) {
+        const invokePromise = sb.functions.invoke("ml-sync", {
+          body: {
+            access_token: token,
+            from_date: fromDate,
+            to_date: toDate,
+            include_payments_details: includePaymentsDetails,
+            max_pages: maxPages
+          }
+        });
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("timeout_sync")), timeoutMs)
+        );
+        const { data, error } = (await Promise.race([invokePromise, timeoutPromise])) as {
+          data: unknown;
+          error: { message?: string } | null;
+        };
+        if (error) throw new Error(error.message);
+        const payload = (data || {}) as SyncResponse;
+        if (!payload?.seller) throw new Error("Resposta invalida da funcao ml-sync.");
+        return payload;
+      }
 
-      if (error) throw new Error(error.message);
-      const payload = (data || {}) as SyncResponse;
-      if (!payload?.seller) throw new Error("Resposta invalida da funcao ml-sync.");
+      let payload: SyncResponse;
+      try {
+        payload = await runSync(
+          true,
+          silent ? Math.min(AUTO_SYNC_MAX_PAGES, 25) : Math.min(MANUAL_SYNC_MAX_PAGES, 120),
+          silent ? 22000 : 45000
+        );
+      } catch {
+        payload = await runSync(false, 12, 15000);
+        setSyncInfo("Sincronizacao parcial carregada. Clique em 'Sincronizar agora' para buscar tarifas/frete completos.");
+      }
 
       setSeller(payload.seller || null);
       setOrders(payload.orders || []);
