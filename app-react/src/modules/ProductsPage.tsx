@@ -479,6 +479,7 @@ export function ProductsPage() {
         price: Number(editPrice) || 0
       }))
     };
+    const recalculatedCost = Number(calcBaseCostFromJson(nextJson).toFixed(2));
 
     const { error: updateError } = await supabase
       .from("pricing_products")
@@ -486,7 +487,7 @@ export function ProductsPage() {
         product_name: name,
         product_image_data: editImageData || null,
         selling_price: Number(editPrice) || 0,
-        base_cost: Number(editCost) || 0,
+        base_cost: recalculatedCost,
         final_margin: Number(editMargin) || 0,
         materials_json: nextJson
       })
@@ -503,13 +504,14 @@ export function ProductsPage() {
       product_name: name,
       product_image_data: editImageData || null,
       selling_price: Number(editPrice) || 0,
-      base_cost: Number(editCost) || 0,
+      base_cost: recalculatedCost,
       final_margin: Number(editMargin) || 0,
       materials_json: nextJson
     };
 
     setItems((prev) => prev.map((item) => (String(item.id) === String(selected.id) ? updatedProduct : item)));
     setSelected(updatedProduct);
+    setEditCost(recalculatedCost);
     setEditStatus("Produto atualizado com sucesso.");
     setSavingEdit(false);
     setEditMode(false);

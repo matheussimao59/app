@@ -1,10 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
-import {
-  DEFAULT_ORDER_FEE_CONFIG,
-  type OrderFeeConfig,
-  loadOrderFeeConfig
-} from "../lib/orderFeeConfig";
 
 type SellerProfile = {
   id: number;
@@ -255,8 +250,7 @@ function calcPaymentFee(payment: NonNullable<Order["payments"]>[number]) {
 function calcOrderFee(
   order: Order,
   total: number,
-  paid: number,
-  fallbackRule?: { percent: number; fixed: number }
+  paid: number
 ) {
   const payments = order.payments || [];
   let feeByPayments = 0;
@@ -281,10 +275,7 @@ function calcOrderFee(
 
   const byDiff = Math.max(total - paid, 0);
   if (byDiff > 0) return byDiff;
-
-  const percent = Number(fallbackRule?.percent) || 0;
-  const fixed = Number(fallbackRule?.fixed) || 0;
-  return total > 0 ? total * (percent / 100) + fixed : 0;
+  return 0;
 }
 
 function calcOrderTaxes(order: Order) {
@@ -402,10 +393,7 @@ async function createCodeChallenge(verifier: string) {
   return base64UrlEncode(digest);
 }
 
-function computeStats(
-  orders: Order[],
-  fallbackRule: { percent: number; fixed: number }
-): { stats: DashboardStats; topProducts: TopProduct[]; lines: OrderLine[] } {
+function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: TopProduct[]; lines: OrderLine[] } {
   const validOrders = orders.filter((order) => !String(order.status || "").toLowerCase().includes("cancel"));
   const ordersCount = validOrders.length;
   let unitsCount = 0;
@@ -422,7 +410,7 @@ function computeStats(
   for (const order of orders) {
     const total = Number(order.total_amount) || 0;
     const paid = Number(order.paid_amount) || 0;
-    const fee = calcOrderFee(order, total, paid, fallbackRule);
+    const fee = calcOrderFee(order, total, paid);
     const taxes = calcOrderTaxes(order);
     let shipping = calcOrderShipping(order);
     const totalDiscount = Math.max(total - paid, 0);
@@ -540,7 +528,6 @@ export function MercadoLivrePage() {
   const [customizationSent, setCustomizationSent] = useState<Record<number, true>>({});
   const [sendingCustomizationKey, setSendingCustomizationKey] = useState<string | null>(null);
   const [customizationTemplate, setCustomizationTemplate] = useState(DEFAULT_CUSTOMIZATION_TEMPLATE);
-  const [feeConfig, setFeeConfig] = useState<OrderFeeConfig>(DEFAULT_ORDER_FEE_CONFIG);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const handledOauthCodeRef = useRef<string | null>(null);
   const syncRunningRef = useRef(false);
@@ -709,19 +696,6 @@ export function MercadoLivrePage() {
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    async function loadFeeRules() {
-      const cfg = await loadOrderFeeConfig();
-      if (!mounted) return;
-      setFeeConfig(cfg);
-    }
-    void loadFeeRules();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
     if (!oauthCode || !userId) return;
     if (handledOauthCodeRef.current === oauthCode) return;
     handledOauthCodeRef.current = oauthCode;
@@ -741,17 +715,7 @@ export function MercadoLivrePage() {
     };
   }, [accessToken, rangeDays, userId]);
 
-  const mlFallbackRule = useMemo(() => {
-    const mlOverride = feeConfig.overrides.find((row) =>
-      normalizeKey(row.name).includes("mercado livre")
-    );
-    return {
-      percent: Number(mlOverride?.percent ?? feeConfig.default.percent) || 0,
-      fixed: Number(mlOverride?.fixed ?? feeConfig.default.fixed) || 0
-    };
-  }, [feeConfig]);
-
-  const dashboard = useMemo(() => computeStats(orders, mlFallbackRule), [orders, mlFallbackRule]);
+  const dashboard = useMemo(() => computeStats(orders), [orders]);
   const isConnected = Boolean(accessToken);
   const isConnectingState = bootstrapping || (isConnected && !seller);
   const productsById = useMemo(() => {
@@ -1195,7 +1159,7 @@ export function MercadoLivrePage() {
           access_token: token,
           from_date: fromDate,
           to_date: toDate,
-          include_payments_details: !silent,
+          include_payments_details: true,
           max_pages: silent ? AUTO_SYNC_MAX_PAGES : MANUAL_SYNC_MAX_PAGES
         }
       });
@@ -1339,7 +1303,7 @@ export function MercadoLivrePage() {
             access_token: token,
             from_date: fromDate,
             to_date: toDate,
-            include_payments_details: false,
+            include_payments_details: true,
             max_pages: MANUAL_SYNC_MAX_PAGES
           }
         }
