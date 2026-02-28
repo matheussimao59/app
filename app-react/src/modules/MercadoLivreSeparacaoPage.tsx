@@ -230,7 +230,13 @@ export function MercadoLivreSeparacaoPage() {
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [deletingFiltered, setDeletingFiltered] = useState(false);
+  const [webCameraEnabled, setWebCameraEnabled] = useState(false);
+  const [cameraSupported, setCameraSupported] = useState(true);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const trackingInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraTimerRef = useRef<number | null>(null);
 
   async function loadSavedOrders(uid: string) {
     if (!supabase) return;
@@ -505,6 +511,76 @@ export function MercadoLivreSeparacaoPage() {
     if (navigator.vibrate) navigator.vibrate(70);
   }
 
+  function stopWebCamera() {
+    if (cameraTimerRef.current) {
+      window.clearInterval(cameraTimerRef.current);
+      cameraTimerRef.current = null;
+    }
+    if (cameraStreamRef.current) {
+      for (const track of cameraStreamRef.current.getTracks()) {
+        track.stop();
+      }
+      cameraStreamRef.current = null;
+    }
+    const video = cameraVideoRef.current;
+    if (video) {
+      video.pause();
+      video.srcObject = null;
+    }
+  }
+
+  async function startWebCamera() {
+    setCameraError(null);
+
+    const hasCameraApi = Boolean(navigator.mediaDevices?.getUserMedia);
+    const BarcodeDetectorCtor = (window as any).BarcodeDetector;
+    if (!hasCameraApi || !BarcodeDetectorCtor) {
+      setCameraSupported(false);
+      setCameraError("Scanner por camera nao suportado neste navegador. Use Chrome/Edge atualizado.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false
+      });
+
+      const video = cameraVideoRef.current;
+      if (!video) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
+
+      cameraStreamRef.current = stream;
+      video.srcObject = stream;
+      video.setAttribute("playsinline", "true");
+      await video.play();
+
+      const detector = new BarcodeDetectorCtor({
+        formats: ["code_128", "ean_13", "ean_8", "upc_a", "upc_e", "qr_code"]
+      });
+
+      cameraTimerRef.current = window.setInterval(async () => {
+        try {
+          if (!cameraVideoRef.current || cameraVideoRef.current.readyState < 2) return;
+          const codes = await detector.detect(cameraVideoRef.current);
+          const first = Array.isArray(codes) && codes[0] ? String(codes[0].rawValue || "").trim() : "";
+          if (!first) return;
+          openByTrackingValue(first);
+          setTrackingSearch(first);
+        } catch {
+          // Silencioso para evitar ruido durante loop continuo de leitura.
+        }
+      }, 350);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Falha ao abrir camera.";
+      setCameraError(`Nao foi possivel abrir a camera: ${message}`);
+      setWebCameraEnabled(false);
+      stopWebCamera();
+    }
+  }
+
   useEffect(() => {
     if (!scannerMode) return;
     const timer = setInterval(() => {
@@ -514,6 +590,19 @@ export function MercadoLivreSeparacaoPage() {
     }, 1200);
     return () => clearInterval(timer);
   }, [scannerMode, selectedOrder]);
+
+  useEffect(() => {
+    if (!webCameraEnabled) {
+      stopWebCamera();
+      return;
+    }
+    void startWebCamera();
+    return () => stopWebCamera();
+  }, [webCameraEnabled]);
+
+  useEffect(() => {
+    return () => stopWebCamera();
+  }, []);
 
   const stats = useMemo(() => {
     const uniqueTrackings = new Set(
@@ -695,7 +784,7 @@ export function MercadoLivreSeparacaoPage() {
               ) : (
                 productionRows.map((row) => (
                   <tr key={row.key}>
-                    <td>
+                    <td data-label="Foto">
                       {row.imageUrl ? (
                         <img
                           className="ml-thumb"
@@ -714,14 +803,14 @@ export function MercadoLivreSeparacaoPage() {
                         📦
                       </span>
                     </td>
-                    <td className="ml-col-title">{row.info}</td>
-                    <td>{row.sku}</td>
-                    <td>{row.unitsPerAd}</td>
-                    <td>{row.cartQty}</td>
-                    <td>
+                    <td className="ml-col-title" data-label="Informacao">{row.info}</td>
+                    <td data-label="SKU">{row.sku}</td>
+                    <td data-label="Und por anuncio">{row.unitsPerAd}</td>
+                    <td data-label="Qtd carrinho">{row.cartQty}</td>
+                    <td data-label="Total produzir">
                       <strong>{row.totalProduce}</strong>
                     </td>
-                    <td>{row.ordersCount}</td>
+                    <td data-label="Pedidos">{row.ordersCount}</td>
                   </tr>
                 ))
               )}
@@ -803,6 +892,16 @@ export function MercadoLivreSeparacaoPage() {
           )}
           <button
             type="button"
+            className={webCameraEnabled ? "primary-btn" : "ghost-btn"}
+            onClick={() => {
+              setWebCameraEnabled((prev) => !prev);
+              setCameraError(null);
+            }}
+          >
+            {webCameraEnabled ? "Camera Web: Ativa" : "Ativar camera web"}
+          </button>
+          <button
+            type="button"
             className="ghost-btn"
             onClick={() => void deleteFilteredOrders()}
             disabled={deletingFiltered || loadingInit || filteredByTracking.length === 0}
@@ -810,6 +909,20 @@ export function MercadoLivreSeparacaoPage() {
             {deletingFiltered ? "Excluindo filtrados..." : "Excluir filtrados"}
           </button>
         </div>
+        {webCameraEnabled && (
+          <div className="ml-camera-panel">
+            <video ref={cameraVideoRef} className="ml-camera-video" muted />
+            <div className="ml-camera-help">
+              Aponte a camera para o codigo de barras/rastreio para preencher automaticamente.
+            </div>
+          </div>
+        )}
+        {!cameraSupported && (
+          <p className="page-text">
+            Scanner web indisponivel neste navegador. Use Chrome/Edge recente ou scanner via teclado.
+          </p>
+        )}
+        {cameraError && <p className="error-text">{cameraError}</p>}
         {scanStatus && <p className="page-text">{scanStatus}</p>}
 
         <div className="table-wrap">
@@ -838,18 +951,18 @@ export function MercadoLivreSeparacaoPage() {
               ) : (
                 filteredByTracking.slice(0, 200).map((row) => (
                   <tr key={row.id}>
-                    <td className="ml-col-order-id">{row.tracking_number || "-"}</td>
-                    <td className="ml-col-order-id">{row.platform_order_number || "-"}</td>
-                    <td>{row.recipient_name || "-"}</td>
-                    <td className="ml-col-title">{row.ad_name || "-"}</td>
-                    <td>{row.product_qty || 1}</td>
-                    <td>{formatDate(row.updated_at)}</td>
-                    <td>
+                    <td className="ml-col-order-id" data-label="Rastreio">{row.tracking_number || "-"}</td>
+                    <td className="ml-col-order-id" data-label="Pedido">{row.platform_order_number || "-"}</td>
+                    <td data-label="Destinatario">{row.recipient_name || "-"}</td>
+                    <td className="ml-col-title" data-label="Anuncio">{row.ad_name || "-"}</td>
+                    <td data-label="Qtd">{row.product_qty || 1}</td>
+                    <td data-label="Atualizado">{formatDate(row.updated_at)}</td>
+                    <td data-label="Detalhes">
                       <button type="button" className="ghost-btn" onClick={() => setSelectedOrder(row)}>
                         Visualizar
                       </button>
                     </td>
-                    <td>
+                    <td data-label="Excluir">
                       <button
                         type="button"
                         className="ghost-btn"
@@ -893,13 +1006,13 @@ export function MercadoLivreSeparacaoPage() {
               ) : (
                 previewRows.map((row) => (
                   <tr key={row.rowId}>
-                    <td className="ml-col-order-id">{row.platformOrderNumber || "-"}</td>
-                    <td className="ml-col-title">{row.adName || "-"}</td>
-                    <td>{row.sku || "-"}</td>
-                    <td>{row.variation || "-"}</td>
-                    <td>{row.productQty}</td>
-                    <td>{row.recipientName || "-"}</td>
-                    <td className="ml-col-order-id">{row.trackingNumber || "-"}</td>
+                    <td className="ml-col-order-id" data-label="Pedido">{row.platformOrderNumber || "-"}</td>
+                    <td className="ml-col-title" data-label="Anuncio">{row.adName || "-"}</td>
+                    <td data-label="SKU">{row.sku || "-"}</td>
+                    <td data-label="Variacao">{row.variation || "-"}</td>
+                    <td data-label="Qtd">{row.productQty}</td>
+                    <td data-label="Destinatario">{row.recipientName || "-"}</td>
+                    <td className="ml-col-order-id" data-label="Rastreio">{row.trackingNumber || "-"}</td>
                   </tr>
                 ))
               )}
