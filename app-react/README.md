@@ -23,6 +23,23 @@ Esta pasta contem a base do sistema em `React + Vite + TypeScript`.
 4. Rode em desenvolvimento:
    - `npm run dev`
 
+## APK Android (Capacitor)
+
+1. Instale dependencias:
+   - `npm install`
+2. Inicialize Android (uma vez):
+   - `npm run android:init`
+3. Para atualizar o app Android apos mudancas no React:
+   - `npm run android:sync`
+4. Abrir no Android Studio:
+   - `npm run android:open`
+5. No Android Studio:
+   - Build > Build Bundle(s) / APK(s) > Build APK(s)
+
+Observacao:
+- O menu `Mercado Livre > Enviar Pedido` ja esta com modo de scanner para Android.
+- Para operar com leitor de codigo, ative `Ativar scanner Android` e use Enter apos leitura.
+
 ## Estrutura atual
 
 - `public/legacy/index.html`: snapshot do sistema legado completo.

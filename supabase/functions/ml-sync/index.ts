@@ -16,10 +16,15 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-async function fetchMl(path: string, accessToken: string) {
+async function fetchMl(
+  path: string,
+  accessToken: string,
+  extraHeaders?: Record<string, string>
+) {
   const response = await fetch(`https://api.mercadolibre.com${path}`, {
     headers: {
-      Authorization: `Bearer ${accessToken}`
+      Authorization: `Bearer ${accessToken}`,
+      ...(extraHeaders || {})
     }
   });
 
@@ -139,6 +144,125 @@ async function fetchShipmentDetails(shipmentId: string, accessToken: string) {
   }
 }
 
+function readNumber(value: unknown) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function amountFromObject(row: Record<string, unknown>) {
+  const candidates = [
+    row.seller_cost,
+    row.cost,
+    row.amount,
+    row.net_amount,
+    row.gross_amount,
+    row.total
+  ];
+  for (const value of candidates) {
+    const parsed = readNumber(value);
+    if (parsed > 0) return parsed;
+  }
+  return 0;
+}
+
+function extractShipmentSellerCost(payload: unknown) {
+  if (!payload) return 0;
+
+  if (Array.isArray(payload)) {
+    let sum = 0;
+    for (const entry of payload) {
+      if (!entry || typeof entry !== "object") continue;
+      const row = entry as Record<string, unknown>;
+      const payer = String(row.payer_type || row.payer || "").toLowerCase();
+      const amount = Math.abs(amountFromObject(row));
+      if (!amount) continue;
+      if (payer.includes("seller") || payer.includes("sender") || !payer) {
+        sum += amount;
+      }
+    }
+    if (sum > 0) return sum;
+  }
+
+  if (typeof payload === "object") {
+    const obj = payload as Record<string, unknown>;
+
+    const senders = obj.senders;
+    if (Array.isArray(senders) && senders.length > 0) {
+      const sum = senders.reduce((acc, entry) => {
+        if (!entry || typeof entry !== "object") return acc;
+        return acc + Math.abs(amountFromObject(entry as Record<string, unknown>));
+      }, 0);
+      if (sum > 0) return sum;
+    }
+
+    if (obj.sender && typeof obj.sender === "object") {
+      const amount = Math.abs(amountFromObject(obj.sender as Record<string, unknown>));
+      if (amount > 0) return amount;
+    }
+
+    if (obj.seller && typeof obj.seller === "object") {
+      const amount = Math.abs(amountFromObject(obj.seller as Record<string, unknown>));
+      if (amount > 0) return amount;
+    }
+
+    if (Array.isArray(obj.costs) && obj.costs.length > 0) {
+      const sum = obj.costs.reduce((acc, entry) => {
+        if (!entry || typeof entry !== "object") return acc;
+        const row = entry as Record<string, unknown>;
+        const payer = String(row.payer_type || row.payer || "").toLowerCase();
+        const amount = Math.abs(amountFromObject(row));
+        if (!amount) return acc;
+        if (payer.includes("seller") || payer.includes("sender") || !payer) return acc + amount;
+        return acc;
+      }, 0);
+      if (sum > 0) return sum;
+    }
+
+    const direct = Math.abs(amountFromObject(obj));
+    if (direct > 0) return direct;
+  }
+
+  return 0;
+}
+
+async function fetchShipmentCosts(shipmentId: string, accessToken: string) {
+  try {
+    const payload = await fetchMl(`/shipments/${shipmentId}/costs`, accessToken);
+    const sellerCost = extractShipmentSellerCost(payload);
+    return {
+      sellerCost,
+      raw: payload
+    };
+  } catch (error) {
+    console.warn("[ml-sync] /shipments/{id}/costs falhou", {
+      shipmentId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return { sellerCost: 0, raw: null as unknown };
+  }
+}
+
+async function fetchShipmentPaymentsCost(shipmentId: string, accessToken: string) {
+  try {
+    const payload = await fetchMl(
+      `/shipments/${shipmentId}/payments`,
+      accessToken,
+      { "x-format-new": "true" }
+    );
+    const sellerCost = extractShipmentSellerCost(payload);
+    return {
+      sellerCost,
+      raw: payload
+    };
+  } catch (error) {
+    console.warn("[ml-sync] /shipments/{id}/payments falhou", {
+      shipmentId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return { sellerCost: 0, raw: null as unknown };
+  }
+}
+
 async function attachShipmentsToOrders(
   orders: Array<{
     id?: number;
@@ -154,6 +278,8 @@ async function attachShipmentsToOrders(
       delivered_at?: string;
       estimated_delivery_time?: { date?: string };
     };
+    shipping_cost_seller?: number;
+    shipping_cost_raw?: unknown;
     shipping_date_resolved?: string;
   }>,
   accessToken: string
@@ -172,18 +298,38 @@ async function attachShipmentsToOrders(
   }
 
   const shipmentMap = new Map<string, unknown>();
+  const shipmentCostMap = new Map<string, { sellerCost: number; raw: unknown }>();
   const ids = [...shipmentIds];
   const concurrency = 8;
   for (let i = 0; i < ids.length; i += concurrency) {
     const chunk = ids.slice(i, i + concurrency);
     const rows = await Promise.all(
-      chunk.map(async (shipmentId) => ({
-        shipmentId,
-        details: await fetchShipmentDetails(shipmentId, accessToken)
-      }))
+      chunk.map(async (shipmentId) => {
+        const details = await fetchShipmentDetails(shipmentId, accessToken);
+        const costs = await fetchShipmentCosts(shipmentId, accessToken);
+        let sellerCost = costs.sellerCost;
+        let raw = costs.raw;
+        if (sellerCost <= 0) {
+          const fallback = await fetchShipmentPaymentsCost(shipmentId, accessToken);
+          if (fallback.sellerCost > 0) {
+            sellerCost = fallback.sellerCost;
+            raw = fallback.raw;
+          }
+        }
+        return {
+          shipmentId,
+          details,
+          sellerCost,
+          costRaw: raw
+        };
+      })
     );
     for (const row of rows) {
       if (row.details) shipmentMap.set(row.shipmentId, row.details);
+      shipmentCostMap.set(row.shipmentId, {
+        sellerCost: row.sellerCost,
+        raw: row.costRaw
+      });
     }
   }
 
@@ -205,13 +351,17 @@ async function attachShipmentsToOrders(
         estimated_delivery_time?: { date?: string };
       };
     }
+    const costInfo = shipmentId ? shipmentCostMap.get(shipmentId) : null;
+    order.shipping_cost_seller = Math.max(0, Number(costInfo?.sellerCost) || 0);
+    if (costInfo?.raw) order.shipping_cost_raw = costInfo.raw;
     order.shipping_date_resolved = resolveShippingDate(order);
   }
 
   console.log("[ml-sync] resumo remessas", {
     orders: orders.length,
     shipmentIds: shipmentIds.size,
-    enriched: shipmentMap.size
+    enriched: shipmentMap.size,
+    withSellerCost: [...shipmentCostMap.values()].filter((v) => (v.sellerCost || 0) > 0).length
   });
 }
 

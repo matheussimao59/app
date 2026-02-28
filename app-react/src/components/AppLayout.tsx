@@ -132,11 +132,11 @@ export function AppLayout() {
                   Mensagens
                 </NavLink>
                 <NavLink
-                  to="/mercado-livre/separacao-producao"
+                  to="/mercado-livre/enviar-pedido"
                   onClick={closeMenu}
                   className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
                 >
-                  Separacao de Producao
+                  Separacao de Pedido
                 </NavLink>
               </div>
             )}

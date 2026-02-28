@@ -26,6 +26,8 @@ type Order = {
   total_amount?: number;
   paid_amount?: number;
   shipping_cost?: number;
+  shipping_cost_seller?: number;
+  shipping_cost_raw?: unknown;
   taxes_amount?: number;
   payments?: Array<{
     status?: string;
@@ -329,13 +331,16 @@ function calcPaymentShippingSeller(payment: NonNullable<Order["payments"]>[numbe
 }
 
 function calcOrderShipping(order: Order) {
+  const shippingByShipment = Math.max(Number(order.shipping_cost_seller) || 0, 0);
+  if (shippingByShipment > 0) return shippingByShipment;
+
   const payments = order.payments || [];
   let shippingByPayments = 0;
   for (const p of payments) {
     if (String(p.status || "").toLowerCase() === "cancelled") continue;
     shippingByPayments += calcPaymentShippingSeller(p);
   }
-  // So considera frete do vendedor com evidência nos pagamentos.
+  // Só considera frete do vendedor com evidência nos pagamentos.
   return shippingByPayments;
 }
 
@@ -452,13 +457,6 @@ function computeStats(orders: Order[]): { stats: DashboardStats; topProducts: To
     const fee = calcOrderFee(order, total, paid);
     const taxes = calcOrderTaxes(order);
     let shipping = calcOrderShipping(order);
-    const totalDiscount = Math.max(total - paid, 0);
-    const knownDiscount = Math.max(fee + taxes + shipping, 0);
-    // Alguns pedidos do ML nao trazem shipping_cost detalhado, mas trazem total x pago.
-    // Nesse caso, usa o saldo restante como frete do vendedor.
-    if (totalDiscount > 0 && knownDiscount + 0.01 < totalDiscount) {
-      shipping += totalDiscount - knownDiscount;
-    }
     const isCancelled = String(order.status || "").toLowerCase().includes("cancel");
     const items = order.order_items || [];
     let rowQty = 0;
@@ -1216,6 +1214,7 @@ export function MercadoLivrePage() {
             from_date: fromDate,
             to_date: toDate,
             include_payments_details: includePaymentsDetails,
+            include_shipments_details: true,
             max_pages: maxPages
           }
         });
@@ -1397,6 +1396,7 @@ export function MercadoLivrePage() {
             from_date: fromDate,
             to_date: toDate,
             include_payments_details: false,
+            include_shipments_details: true,
             max_pages: MANUAL_SYNC_MAX_PAGES
           }
         }
@@ -1775,6 +1775,8 @@ export function MercadoLivrePage() {
                         total_amount: rawOrder?.total_amount,
                         paid_amount: rawOrder?.paid_amount,
                         shipping_cost_root: rawOrder?.shipping_cost,
+                        shipping_cost_seller: rawOrder?.shipping_cost_seller,
+                        shipping_cost_raw: rawOrder?.shipping_cost_raw,
                         taxes_amount_root: rawOrder?.taxes_amount,
                         computed: {
                           fee: row.fee,

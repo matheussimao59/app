@@ -1,5 +1,9 @@
 app-react/node_modules/
 app-react/dist/
 app-react/.env
+app-react/android/.gradle/
+app-react/android/local.properties
+app-react/android/app/build/
+app-react/android/build/
 backend-laravel/vendor/
 backend-laravel/.env
