@@ -231,6 +231,7 @@ export function MercadoLivreSeparacaoPage() {
   const [savedOrders, setSavedOrders] = useState<ShippingOrder[]>([]);
   const [trackingSearch, setTrackingSearch] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<ShippingOrder | null>(null);
+  const [showPackedOrdersModal, setShowPackedOrdersModal] = useState(false);
   const [scannerMode, setScannerMode] = useState(false);
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
@@ -684,6 +685,14 @@ export function MercadoLivreSeparacaoPage() {
     };
   }, [savedOrders]);
 
+  const packedOrders = useMemo(
+    () =>
+      savedOrders
+        .filter((row) => isOrderPacked(row))
+        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
+    [savedOrders]
+  );
+
   const productionRows = useMemo(() => {
     const source =
       previewRows.length > 0
@@ -773,11 +782,16 @@ export function MercadoLivreSeparacaoPage() {
           <strong>{fileName ? "Pronta" : "-"}</strong>
           <span>{fileName || "Nenhum arquivo importado"}</span>
         </article>
-        <article className="kpi-card">
+        <button
+          type="button"
+          className="kpi-card ml-kpi-action-card"
+          onClick={() => setShowPackedOrdersModal(true)}
+          title="Ver pedidos embalados"
+        >
           <p>Pedidos Embalados</p>
           <strong>{stats.packedOrders}</strong>
           <span>Pedidos marcados como embalados</span>
-        </article>
+        </button>
         <article className="kpi-card">
           <p>Pedidos Sem embalar</p>
           <strong>{stats.unpackedOrders}</strong>
@@ -1167,6 +1181,75 @@ export function MercadoLivreSeparacaoPage() {
                   {packingOrderId === selectedOrder.id ? "Salvando..." : "Pedido Embalado"}
                 </button>
               </div>
+            </div>
+          </article>
+        </div>
+      )}
+
+      {showPackedOrdersModal && (
+        <div className="assistant-modal-backdrop" onClick={() => setShowPackedOrdersModal(false)}>
+          <article className="assistant-modal ml-packed-orders-modal" onClick={(e) => e.stopPropagation()}>
+            <header className="assistant-modal-head">
+              <h3>Pedidos embalados</h3>
+              <button type="button" onClick={() => setShowPackedOrdersModal(false)}>
+                Fechar
+              </button>
+            </header>
+
+            <p className="page-text">
+              {packedOrders.length} pedido(s) marcado(s) como embalado(s).
+            </p>
+
+            <div className="ml-packed-orders-list">
+              {packedOrders.length === 0 ? (
+                <div className="ml-packed-order-card">
+                  <p className="page-text">Nenhum pedido embalado ainda.</p>
+                </div>
+              ) : (
+                packedOrders.map((row) => {
+                  const packedAtRaw =
+                    row.row_raw && typeof row.row_raw === "object"
+                      ? (row.row_raw.packed_at as string | undefined)
+                      : undefined;
+                  const packedAt = packedAtRaw || row.updated_at;
+                  const sku = safeRawValue(row.row_raw, "sku");
+
+                  return (
+                    <article key={row.id} className="ml-packed-order-card">
+                      <div className="ml-packed-order-top">
+                        {row.image_url ? (
+                          <img
+                            src={String(row.image_url).replace(/^http:\/\//i, "https://")}
+                            alt={row.ad_name || "Imagem do pedido"}
+                            className="ml-packed-order-image"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="ml-packed-order-image empty">Sem imagem</div>
+                        )}
+                        <div className="ml-packed-order-main">
+                          <p><strong>Pedido:</strong> {row.platform_order_number || "-"}</p>
+                          <p><strong>Rastreio:</strong> {row.tracking_number || "-"}</p>
+                          <p><strong>Destinatario:</strong> {row.recipient_name || "-"}</p>
+                          <p><strong>Anuncio:</strong> {row.ad_name || "-"}</p>
+                          <p><strong>Variacao:</strong> {row.variation || "-"}</p>
+                        </div>
+                      </div>
+                      <div className="ml-packed-order-grid">
+                        <p><strong>SKU:</strong> {sku || "-"}</p>
+                        <p><strong>Quantidade:</strong> {row.product_qty || 1}</p>
+                        <p><strong>Arquivo:</strong> {row.source_file_name || "-"}</p>
+                        <p><strong>Embalado em:</strong> {formatDate(packedAt)}</p>
+                        <p><strong>Notas:</strong> {row.buyer_notes || "-"}</p>
+                        <p><strong>Observacoes:</strong> {row.observations || "-"}</p>
+                      </div>
+                      <button type="button" className="ghost-btn" onClick={() => setSelectedOrder(row)}>
+                        Ver detalhes
+                      </button>
+                    </article>
+                  );
+                })
+              )}
             </div>
           </article>
         </div>

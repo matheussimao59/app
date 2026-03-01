@@ -1351,6 +1351,16 @@ body {
   background: linear-gradient(135deg, #0f766e, #115e59);
 }
 
+.ml-kpi-action-card {
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ml-kpi-action-card:hover {
+  filter: brightness(1.05);
+}
+
 .ml-upload-panel {
   margin-bottom: 12px;
 }
@@ -1482,6 +1492,67 @@ body {
 .ml-shipping-detail-list .ghost-btn {
   width: fit-content;
   margin-top: 6px;
+}
+
+.ml-packed-orders-modal {
+  width: min(1040px, 96vw);
+  max-height: calc(100vh - 56px);
+  overflow: auto;
+}
+
+.ml-packed-orders-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.ml-packed-order-card {
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.ml-packed-order-top {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 10px;
+}
+
+.ml-packed-order-image {
+  width: 90px;
+  height: 90px;
+  border-radius: 10px;
+  border: 1px solid #dbe3ef;
+  object-fit: cover;
+  background: #f8fafc;
+}
+
+.ml-packed-order-image.empty {
+  display: grid;
+  place-items: center;
+  color: #64748b;
+  font-size: 0.76rem;
+}
+
+.ml-packed-order-main,
+.ml-packed-order-grid {
+  display: grid;
+  gap: 5px;
+}
+
+.ml-packed-order-main p,
+.ml-packed-order-grid p {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.3;
+}
+
+.ml-packed-order-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 10px;
 }
 
 .scan-live-indicator {
@@ -1704,6 +1775,12 @@ body {
     padding: 10px;
   }
 
+  .assistant-modal.ml-packed-orders-modal {
+    width: min(620px, 100%);
+    max-height: calc(100vh - 120px);
+    padding: 10px;
+  }
+
   .ml-shipping-modal-grid {
     gap: 8px;
   }
@@ -1730,6 +1807,26 @@ body {
     width: 100%;
     min-height: 34px;
     margin-top: 4px;
+  }
+
+  .ml-packed-order-top {
+    grid-template-columns: 70px 1fr;
+    gap: 8px;
+  }
+
+  .ml-packed-order-image {
+    width: 70px;
+    height: 70px;
+  }
+
+  .ml-packed-order-main p,
+  .ml-packed-order-grid p {
+    font-size: 0.77rem;
+  }
+
+  .ml-packed-order-grid {
+    grid-template-columns: 1fr;
+    gap: 5px;
   }
 }
 
