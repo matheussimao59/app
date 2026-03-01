@@ -104,7 +104,7 @@ export function AppLayout() {
     { id: "precificacao", label: "Precificacao", path: "/precificacao" },
     { id: "calendario", label: "Calendario", path: "/calendario" },
     { id: "produtos", label: "Meus Produtos", path: "/produtos" },
-    { id: "pedidos", label: "Pedidos", path: "/pedidos/pendentes" },
+    { id: "pedidos", label: "Pedidos", path: "/mercado-livre/enviar-pedido" },
     { id: "teste_impressao", label: "Teste de Impressao", path: "/teste-impressao" },
     { id: "configuracoes", label: "Configuracoes", path: "/configuracoes" }
   ];
@@ -207,9 +207,9 @@ export function AppLayout() {
             <span>Produtos</span>
           </NavLink>
           <NavLink
-            to="/pedidos/pendentes"
+            to="/mercado-livre/enviar-pedido"
             className={({ isActive }) =>
-              isActive || location.pathname.startsWith("/pedidos")
+              isActive || location.pathname.includes("/mercado-livre/enviar-pedido")
                 ? "mobile-footer-item active"
                 : "mobile-footer-item"
             }
