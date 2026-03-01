@@ -345,8 +345,49 @@ function calcPaymentShippingSeller(payment: NonNullable<Order["payments"]>[numbe
   return 0;
 }
 
+function hasSellerShippingEvidence(raw: unknown): boolean {
+  if (!raw) return false;
+
+  const sellerWords = /(seller|sender|vendedor|remetente)/i;
+  const buyerWords = /(buyer|comprador|destinatario|receiver)/i;
+
+  const stack: unknown[] = [raw];
+  let seen = 0;
+  while (stack.length > 0 && seen < 400) {
+    const current = stack.pop();
+    seen += 1;
+    if (!current) continue;
+
+    if (Array.isArray(current)) {
+      for (const item of current) stack.push(item);
+      continue;
+    }
+
+    if (typeof current !== "object") continue;
+    const obj = current as Record<string, unknown>;
+
+    for (const [k, v] of Object.entries(obj)) {
+      const key = String(k || "");
+      const valueText = typeof v === "string" ? v : "";
+
+      if (sellerWords.test(key) && !buyerWords.test(key)) return true;
+      if (sellerWords.test(valueText) && !buyerWords.test(valueText)) return true;
+
+      if (v && typeof v === "object") stack.push(v);
+    }
+
+    const payer = String(obj.payer_type || obj.payer || obj.responsible_party || "").toLowerCase();
+    if (payer.includes("seller") || payer.includes("sender") || payer.includes("vendedor") || payer.includes("remetente")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function calcOrderShipping(order: Order) {
-  const shippingByShipment = Math.max(Number(order.shipping_cost_seller) || 0, 0);
+  const hasShipmentEvidence = hasSellerShippingEvidence(order.shipping_cost_raw);
+  const shippingByShipment = hasShipmentEvidence ? Math.max(Number(order.shipping_cost_seller) || 0, 0) : 0;
   if (shippingByShipment > 0) return shippingByShipment;
 
   const payments = order.payments || [];

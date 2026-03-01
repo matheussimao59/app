@@ -176,7 +176,8 @@ function extractShipmentSellerCost(payload: unknown) {
       const payer = String(row.payer_type || row.payer || "").toLowerCase();
       const amount = Math.abs(amountFromObject(row));
       if (!amount) continue;
-      if (payer.includes("seller") || payer.includes("sender") || !payer) {
+      // Só considerar custo com evidência explícita de vendedor/remetente.
+      if (payer.includes("seller") || payer.includes("sender")) {
         sum += amount;
       }
     }
@@ -212,14 +213,12 @@ function extractShipmentSellerCost(payload: unknown) {
         const payer = String(row.payer_type || row.payer || "").toLowerCase();
         const amount = Math.abs(amountFromObject(row));
         if (!amount) return acc;
-        if (payer.includes("seller") || payer.includes("sender") || !payer) return acc + amount;
+        // Ignora payer ausente/ambíguo para não classificar frete do comprador como vendedor.
+        if (payer.includes("seller") || payer.includes("sender")) return acc + amount;
         return acc;
       }, 0);
       if (sum > 0) return sum;
     }
-
-    const direct = Math.abs(amountFromObject(obj));
-    if (direct > 0) return direct;
   }
 
   return 0;
