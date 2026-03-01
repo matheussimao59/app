@@ -14,6 +14,11 @@ type Order = {
   date_created?: string;
   status?: string;
   total_amount?: number;
+  shipping?: {
+    id?: number | string;
+    status?: string;
+    substatus?: string;
+  };
   buyer?: {
     nickname?: string;
     first_name?: string;
@@ -46,6 +51,7 @@ type DebugInfo = {
   totalLoaded: number;
   totalPendingShipment: number;
   statuses: Array<{ status: string; count: number }>;
+  shippingStatuses: Array<{ status: string; count: number }>;
   sample: Array<{ id: number; status: string; date: string }>;
 };
 
@@ -160,12 +166,21 @@ function filterOrdersByMode(orders: Order[], mode: PedidosMode, opsMap: OrderOps
 
 function isPendingShipment(order: Order) {
   const status = normalizeStatus(order.status);
+  const shippingStatus = normalizeStatus(order.shipping?.status);
+  const shippingSubstatus = normalizeStatus(order.shipping?.substatus);
+
   if (status.includes("cancel")) return false;
   if (isSentStatus(status)) return false;
-  // Mercado Livre pode retornar "paid/confirmed/handling" antes de "ready_to_ship".
+
+  // Critério principal: status de envio da remessa (shipments endpoint).
+  if (shippingStatus.includes("ready_to_ship")) return true;
+  if (shippingStatus.includes("pending")) return true;
+  if (shippingStatus.includes("to_be_agreed")) return true;
+  if (shippingSubstatus.includes("ready_to_ship")) return true;
+  if (shippingSubstatus.includes("to_be_agreed")) return true;
+
+  // Fallback quando ML não retorna shipping status.
   return (
-    status.includes("ready_to_ship") ||
-    status.includes("to_be_agreed") ||
     status.includes("paid") ||
     status.includes("confirmed") ||
     status.includes("handling") ||
@@ -299,6 +314,7 @@ export function PedidosPage({ mode: _mode }: Props) {
               from_date: fromDate,
               to_date: toDate,
               include_payments_details: false,
+              include_shipments_details: true,
               max_pages: 60
             }
           });
@@ -328,11 +344,20 @@ export function PedidosPage({ mode: _mode }: Props) {
       const onlyPendingShipment = loadedOrders.filter((order) => isPendingShipment(order));
       setOrders(onlyPendingShipment);
       const statusMap = new Map<string, number>();
+      const shippingStatusMap = new Map<string, number>();
       for (const order of loadedOrders) {
         const key = normalizeStatus(order.status) || "(vazio)";
         statusMap.set(key, (statusMap.get(key) || 0) + 1);
+        const shippingKey =
+          normalizeStatus(order.shipping?.status) ||
+          normalizeStatus(order.shipping?.substatus) ||
+          "(sem_shipping_status)";
+        shippingStatusMap.set(shippingKey, (shippingStatusMap.get(shippingKey) || 0) + 1);
       }
       const statuses = [...statusMap.entries()]
+        .map(([status, count]) => ({ status, count }))
+        .sort((a, b) => b.count - a.count);
+      const shippingStatuses = [...shippingStatusMap.entries()]
         .map(([status, count]) => ({ status, count }))
         .sort((a, b) => b.count - a.count);
       setDebugInfo({
@@ -340,6 +365,7 @@ export function PedidosPage({ mode: _mode }: Props) {
         totalLoaded: loadedOrders.length,
         totalPendingShipment: onlyPendingShipment.length,
         statuses,
+        shippingStatuses,
         sample: loadedOrders.slice(0, 15).map((order) => ({
           id: Number(order.id) || 0,
           status: normalizeStatus(order.status) || "(vazio)",
@@ -639,6 +665,20 @@ export function PedidosPage({ mode: _mode }: Props) {
                   <ul>
                     {debugInfo.statuses.map((row) => (
                       <li key={row.status}>
+                        <code>{row.status}</code> - {row.count}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <h4>Status de envio (shipments)</h4>
+                {debugInfo.shippingStatuses.length === 0 ? (
+                  <p className="page-text">Nenhum status de envio recebido.</p>
+                ) : (
+                  <ul>
+                    {debugInfo.shippingStatuses.map((row) => (
+                      <li key={`ship-${row.status}`}>
                         <code>{row.status}</code> - {row.count}
                       </li>
                     ))}
