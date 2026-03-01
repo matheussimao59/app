@@ -589,7 +589,7 @@ export function NotaFiscalPage() {
 
       {!loading && rows.length > 0 && (
         <div className="table-wrap">
-          <table className="table clean">
+          <table className="table clean mobile-card-table">
             <thead>
               <tr>
                 <th>Pedido</th>
@@ -606,17 +606,17 @@ export function NotaFiscalPage() {
             <tbody>
               {rows.map(({ order, doc }) => (
                 <tr key={order.id}>
-                  <td>#{order.id}</td>
-                  <td>{fmtDate(order.date_created)}</td>
-                  <td>{buyerFromOrder(order)}</td>
-                  <td>{titleFromOrder(order)}</td>
-                  <td>{fmtMoney(order.total_amount)}</td>
-                  <td>
+                  <td data-label="Pedido">#{order.id}</td>
+                  <td data-label="Data">{fmtDate(order.date_created)}</td>
+                  <td data-label="Cliente">{buyerFromOrder(order)}</td>
+                  <td data-label="Titulo">{titleFromOrder(order)}</td>
+                  <td data-label="Valor">{fmtMoney(order.total_amount)}</td>
+                  <td data-label="Status NF">
                     <span className={`nf-chip ${String(doc?.status || "").toLowerCase()}`}>
                       {statusLabel(doc?.status)}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="XML/PDF">
                     <div className="materials-actions-cell">
                       {doc?.xml_url ? (
                         <a className="ghost-link" href={doc.xml_url} target="_blank" rel="noreferrer">
@@ -632,8 +632,8 @@ export function NotaFiscalPage() {
                       ) : null}
                     </div>
                   </td>
-                  <td>{doc?.access_key || "-"}</td>
-                  <td>
+                  <td data-label="Chave">{doc?.access_key || "-"}</td>
+                  <td data-label="Acao">
                     <div className="materials-actions-cell">
                       <button
                         type="button"

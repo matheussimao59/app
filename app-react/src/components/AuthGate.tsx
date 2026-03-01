@@ -1,4 +1,4 @@
-﻿import { FormEvent, useEffect, useMemo, useState } from "react";
+﻿import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { hasSupabaseConfig, supabase } from "../lib/supabase";
 
@@ -13,6 +13,8 @@ export function AuthGate({ children }: AuthGateProps) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSignUp, setIsSignUp] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const accountRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -33,6 +35,19 @@ export function AuthGate({ children }: AuthGateProps) {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!accountOpen) return;
+
+    function onDocClick(event: MouseEvent) {
+      const target = event.target as Node | null;
+      if (!accountRef.current || (target && accountRef.current.contains(target))) return;
+      setAccountOpen(false);
+    }
+
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [accountOpen]);
 
   const info = useMemo(() => {
     if (hasSupabaseConfig) return null;
@@ -74,9 +89,27 @@ export function AuthGate({ children }: AuthGateProps) {
   if (user) {
     return (
       <>
-        <div className="top-user">
-          <span>{user.email}</span>
-          <button onClick={handleLogout}>Sair</button>
+        <div className="top-account" ref={accountRef}>
+          <button
+            type="button"
+            className="top-account-btn"
+            onClick={() => setAccountOpen((prev) => !prev)}
+            aria-label="Conta"
+            aria-expanded={accountOpen}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <circle cx="12" cy="8" r="3.2" />
+              <path d="M4.8 19.2c1.2-3 3.8-4.7 7.2-4.7s6 1.7 7.2 4.7" />
+            </svg>
+          </button>
+          {accountOpen && (
+            <div className="top-account-pop" role="dialog" aria-label="Informacoes da conta">
+              <p>{user.email}</p>
+              <button type="button" onClick={handleLogout}>
+                Sair
+              </button>
+            </div>
+          )}
         </div>
         {children(user)}
       </>

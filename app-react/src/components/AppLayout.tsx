@@ -67,6 +67,15 @@ function NavIcon({ id }: { id: string }) {
     );
   }
 
+  if (id === "separacao") {
+    return (
+      <svg {...props}>
+        <rect x="4" y="5" width="16" height="14" rx="2" />
+        <path d="M8 9h8M8 12h8M8 15h5" />
+      </svg>
+    );
+  }
+
   return (
     <svg {...props}>
       <circle cx="12" cy="12" r="3.2" />

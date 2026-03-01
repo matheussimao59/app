@@ -151,7 +151,7 @@ export function SettingsPage() {
             </div>
 
             <div className="table-wrap">
-              <table className="table clean">
+              <table className="table clean mobile-card-table">
                 <thead>
                   <tr>
                     <th>Marketplace</th>
@@ -163,14 +163,14 @@ export function SettingsPage() {
                 <tbody>
                   {form.overrides.map((item, index) => (
                     <tr key={item.id}>
-                      <td>
+                      <td data-label="Marketplace">
                         <input
                           value={item.name}
                           onChange={(e) => updateOverride(index, "name", e.target.value)}
                           placeholder="Ex: Shopee"
                         />
                       </td>
-                      <td>
+                      <td data-label="Taxa %">
                         <input
                           type="number"
                           step="0.01"
@@ -178,7 +178,7 @@ export function SettingsPage() {
                           onChange={(e) => updateOverride(index, "percent", e.target.value)}
                         />
                       </td>
-                      <td>
+                      <td data-label="Fixo (R$)">
                         <input
                           type="number"
                           step="0.01"
@@ -186,7 +186,7 @@ export function SettingsPage() {
                           onChange={(e) => updateOverride(index, "fixed", e.target.value)}
                         />
                       </td>
-                      <td>
+                      <td data-label="Acoes">
                         <button className="danger-btn" type="button" onClick={() => removeOverride(index)}>
                           Remover
                         </button>

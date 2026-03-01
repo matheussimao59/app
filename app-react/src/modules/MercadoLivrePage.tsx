@@ -256,7 +256,7 @@ function calcPaymentFee(payment: NonNullable<Order["payments"]>[number]) {
       if (name.includes("envio") || name.includes("frete") || name.includes("shipping")) return false;
       return true;
     })
-    .reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
+    .reduce((acc, c) => acc + Math.abs(Number(c.amount) || 0), 0);
   if (chargeFee > 0) return chargeFee;
 
   return 0;
@@ -306,9 +306,20 @@ function calcPaymentShippingSeller(payment: NonNullable<Order["payments"]>[numbe
   const shippingByFeeType = (payment.fee_details || [])
     .filter((d) => {
       const type = String(d.type || "").toLowerCase();
-      return type.includes("shipping") || type.includes("freight") || type.includes("envio");
+      if (!type) return false;
+      const hasShipping = type.includes("shipping") || type.includes("freight") || type.includes("envio");
+      if (!hasShipping) return false;
+      // Evita jogar frete do comprador no vendedor.
+      const buyerHint = /buyer|comprador/.test(type);
+      if (buyerHint) return false;
+      return true;
     })
-    .reduce((acc, d) => acc + Math.abs(Number(d.amount) || 0), 0);
+    .reduce((acc, d) => {
+      const amount = Number(d.amount) || 0;
+      // Débito ao vendedor costuma vir negativo. Ignora créditos/valores positivos ambíguos.
+      if (amount < 0) return acc + Math.abs(amount);
+      return acc;
+    }, 0);
   if (shippingByFeeType > 0) return shippingByFeeType;
 
   let shippingByExplicitSellerCharge = 0;
@@ -320,7 +331,11 @@ function calcPaymentShippingSeller(payment: NonNullable<Order["payments"]>[numbe
     const sellerHint = /vendedor|seller|por sua conta|sua conta|por conta do vendedor/.test(name);
     if (!hasShipping) continue;
     if (buyerHint && !sellerHint) continue;
-    if (sellerHint || amount < 0) {
+    if (sellerHint && amount !== 0) {
+      shippingByExplicitSellerCharge += Math.abs(amount);
+      continue;
+    }
+    if (amount < 0) {
       shippingByExplicitSellerCharge += Math.abs(amount);
     }
   }
@@ -1741,6 +1756,94 @@ export function MercadoLivrePage() {
           >
             Lucro negativo
           </button>
+        </div>
+        <div className="ml-crm-mobile-list">
+          {pagedLines.length === 0 ? (
+            <div className="ml-crm-empty">Sem pedidos no periodo selecionado.</div>
+          ) : (
+            pagedLines.map((row) => (
+              <article key={`crm-${row.id}`} className="ml-crm-card">
+                <div className="ml-crm-head">
+                  <div className="ml-crm-thumb-wrap">
+                    {row.thumb || row.linkedProductImage ? (
+                      <img
+                        className="ml-thumb"
+                        src={String(row.thumb || row.linkedProductImage || "").replace(/^http:\/\//i, "https://")}
+                        alt={row.title}
+                        loading="lazy"
+                        onError={(e) => {
+                          const img = e.currentTarget;
+                          img.style.display = "none";
+                          const fallback = img.nextElementSibling as HTMLElement | null;
+                          if (fallback) fallback.style.display = "inline-flex";
+                        }}
+                      />
+                    ) : null}
+                    <span
+                      className="ml-thumb-fallback"
+                      style={{ display: row.thumb || row.linkedProductImage ? "none" : "inline-flex" }}
+                    >
+                      📦
+                    </span>
+                  </div>
+                  <div className="ml-crm-title-block">
+                    <strong className="ml-crm-title">{row.title}</strong>
+                    <span className="ml-crm-id">Pedido #{row.id}</span>
+                  </div>
+                  <div className={row.netProfit >= 0 ? "ml-crm-profit up" : "ml-crm-profit down"}>
+                    {fmtMoney(row.netProfit)}
+                  </div>
+                </div>
+
+                <div className="ml-crm-grid">
+                  <div>
+                    <span>Valor</span>
+                    <strong>{fmtMoney(row.amount)}</strong>
+                  </div>
+                  <div>
+                    <span>Tarifa</span>
+                    <strong>{fmtMoney(row.fee)}</strong>
+                  </div>
+                  <div>
+                    <span>Frete</span>
+                    <strong>{fmtMoney(row.shipping)}</strong>
+                  </div>
+                  <div>
+                    <span>Qtd</span>
+                    <strong>{row.qty}</strong>
+                  </div>
+                </div>
+
+                <div className="ml-crm-actions">
+                  <select
+                    className="ml-cost-select"
+                    value={row.linkedProductId}
+                    onChange={(e) => void saveCostLink(row, e.target.value)}
+                    disabled={savingLinkKey === `${row.id}-${row.sku}-${row.title}`}
+                  >
+                    <option value="">Anexar custo do produto...</option>
+                    {savedProducts.map((p) => (
+                      <option key={String(p.id)} value={String(p.id)}>
+                        {`${(p.product_name || "Sem nome").slice(0, 15)}${(p.product_name || "").length > 15 ? "..." : ""}`} - {fmtMoney(Number(p.base_cost) || 0)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => void sendCustomizationRequest(row)}
+                    disabled={sendingCustomizationKey === `${row.id}-${row.packId}` || Boolean(customizationSent[row.id])}
+                  >
+                    {customizationSent[row.id]
+                      ? "Mensagem enviada"
+                      : sendingCustomizationKey === `${row.id}-${row.packId}`
+                        ? "Enviando..."
+                        : "Enviar personalizacao"}
+                  </button>
+                </div>
+              </article>
+            ))
+          )}
         </div>
         <div className="table-wrap">
           <table className="table clean ml-orders-table">

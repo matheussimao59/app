@@ -763,7 +763,7 @@ export function PricingPage() {
           {loadingConfig && <p className="page-text">Carregando taxas do Supabase...</p>}
 
           <div className="table-wrap">
-            <table className="table clean">
+            <table className="table clean mobile-card-table">
               <thead>
                 <tr>
                   <th>Canal</th>
@@ -779,7 +779,7 @@ export function PricingPage() {
               <tbody>
                 {channelPreview.map((c) => (
                   <tr key={c.id}>
-                    <td>
+                    <td data-label="Canal">
                       <input
                         className="table-input"
                         value={c.name}
@@ -787,7 +787,7 @@ export function PricingPage() {
                         disabled={c.id === "padrao" && feeConfig.overrides.length === 0}
                       />
                     </td>
-                    <td>
+                    <td data-label="Taxa %">
                       <input
                         className="table-input"
                         type="number"
@@ -796,7 +796,7 @@ export function PricingPage() {
                         onChange={(e) => updateMarketplace(c.id, "percent", e.target.value)}
                       />
                     </td>
-                    <td>
+                    <td data-label="Taxa fixa">
                       <input
                         className="table-input"
                         type="number"
@@ -805,11 +805,11 @@ export function PricingPage() {
                         onChange={(e) => updateMarketplace(c.id, "fixed", e.target.value)}
                       />
                     </td>
-                    <td>{money(c.fee)}</td>
-                    <td>{money(c.net)}</td>
-                    <td className={c.profit >= 0 ? "profit-up" : "profit-down"}>{money(c.profit)}</td>
-                    <td>{c.margin.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td>
-                    <td>
+                    <td data-label="Taxa">{money(c.fee)}</td>
+                    <td data-label="Receita liquida">{money(c.net)}</td>
+                    <td data-label="Lucro" className={c.profit >= 0 ? "profit-up" : "profit-down"}>{money(c.profit)}</td>
+                    <td data-label="Margem">{c.margin.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%</td>
+                    <td data-label="Acoes">
                       <button
                         type="button"
                         className="danger-btn"
@@ -869,7 +869,7 @@ export function PricingPage() {
             </div>
 
             <div className="table-wrap">
-              <table className="table clean">
+              <table className="table clean mobile-card-table">
                 <thead>
                   <tr>
                     <th>Material</th>
@@ -894,10 +894,10 @@ export function PricingPage() {
                       const value = Number(item.unit_cost ?? item.cost_per_unit ?? 0) || 0;
                       return (
                         <tr key={item.id}>
-                          <td>{item.name}</td>
-                          <td>{money(value)}</td>
-                          <td>{item.unit_of_measure || "un"}</td>
-                          <td className="materials-actions-cell">
+                          <td data-label="Material">{item.name}</td>
+                          <td data-label="Custo">{money(value)}</td>
+                          <td data-label="Unidade">{item.unit_of_measure || "un"}</td>
+                          <td data-label="Acoes" className="materials-actions-cell">
                             <button type="button" className="ghost-btn" onClick={() => startEditLibrary(item)}>Editar</button>
                             <button type="button" className="danger-btn" onClick={() => deleteLibraryMaterial(item.id)}>Excluir</button>
                           </td>

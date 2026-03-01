@@ -45,6 +45,11 @@ type ShippingOrder = {
   updated_at: string;
 };
 
+function isOrderPacked(row: ShippingOrder | null | undefined) {
+  const packed = row?.row_raw && typeof row.row_raw === "object" ? row.row_raw.packed : null;
+  return packed === true;
+}
+
 function normalizeText(text?: string) {
   return String(text || "")
     .normalize("NFD")
@@ -230,7 +235,9 @@ export function MercadoLivreSeparacaoPage() {
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [deletingFiltered, setDeletingFiltered] = useState(false);
+  const [packingOrderId, setPackingOrderId] = useState<string | null>(null);
   const [webCameraEnabled, setWebCameraEnabled] = useState(false);
+  const [fullScreenScanner, setFullScreenScanner] = useState(false);
   const [cameraSupported, setCameraSupported] = useState(true);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const trackingInputRef = useRef<HTMLInputElement | null>(null);
@@ -483,13 +490,48 @@ export function MercadoLivreSeparacaoPage() {
     }
   }
 
+  async function markOrderAsPacked(row: ShippingOrder) {
+    if (!supabase || !userId) return;
+    if (isOrderPacked(row)) {
+      setStatus("Este pedido ja esta marcado como embalado.");
+      return;
+    }
+
+    setPackingOrderId(row.id);
+    setError(null);
+    setStatus(null);
+
+    try {
+      const nextRaw = { ...(row.row_raw || {}), packed: true, packed_at: new Date().toISOString() };
+      const { error: updateError, data } = await supabase
+        .from("ml_shipping_orders")
+        .update({ row_raw: nextRaw, updated_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .eq("id", row.id)
+        .select("*")
+        .single();
+
+      if (updateError) throw new Error(updateError.message);
+
+      const updated = (data || { ...row, row_raw: nextRaw }) as ShippingOrder;
+      setSavedOrders((prev) => prev.map((item) => (item.id === row.id ? updated : item)));
+      setSelectedOrder(updated);
+      setStatus("Pedido marcado como embalado.");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Falha ao marcar pedido como embalado.";
+      setError(`Nao foi possivel marcar como embalado: ${message}`);
+    } finally {
+      setPackingOrderId(null);
+    }
+  }
+
   const filteredByTracking = useMemo(() => {
     const key = normalizeTracking(trackingSearch);
     if (!key) return savedOrders.slice(0, 30);
     return savedOrders.filter((row) => normalizeTracking(row.tracking_number || "").includes(key));
   }, [savedOrders, trackingSearch]);
 
-  function openByTrackingValue(rawValue: string) {
+  function openByTrackingValue(rawValue: string, options?: { closeCameraOnFound?: boolean }) {
     const normalized = normalizeTracking(rawValue);
     if (!normalized) return;
 
@@ -508,7 +550,23 @@ export function MercadoLivreSeparacaoPage() {
 
     setScanStatus(`Pedido encontrado: ${target.platform_order_number || "-"}`);
     setSelectedOrder(target);
+    if (options?.closeCameraOnFound) {
+      setWebCameraEnabled(false);
+      setFullScreenScanner(false);
+    }
     if (navigator.vibrate) navigator.vibrate(70);
+  }
+
+  function openScannerFullscreen() {
+    setCameraError(null);
+    setCameraSupported(true);
+    setWebCameraEnabled(true);
+    setFullScreenScanner(true);
+  }
+
+  function closeScannerFullscreen() {
+    setFullScreenScanner(false);
+    setWebCameraEnabled(false);
   }
 
   function stopWebCamera() {
@@ -537,6 +595,8 @@ export function MercadoLivreSeparacaoPage() {
     if (!hasCameraApi || !BarcodeDetectorCtor) {
       setCameraSupported(false);
       setCameraError("Scanner por camera nao suportado neste navegador. Use Chrome/Edge atualizado.");
+      setFullScreenScanner(false);
+      setWebCameraEnabled(false);
       return;
     }
 
@@ -567,7 +627,7 @@ export function MercadoLivreSeparacaoPage() {
           const codes = await detector.detect(cameraVideoRef.current);
           const first = Array.isArray(codes) && codes[0] ? String(codes[0].rawValue || "").trim() : "";
           if (!first) return;
-          openByTrackingValue(first);
+          openByTrackingValue(first, { closeCameraOnFound: true });
           setTrackingSearch(first);
         } catch {
           // Silencioso para evitar ruido durante loop continuo de leitura.
@@ -577,6 +637,7 @@ export function MercadoLivreSeparacaoPage() {
       const message = e instanceof Error ? e.message : "Falha ao abrir camera.";
       setCameraError(`Nao foi possivel abrir a camera: ${message}`);
       setWebCameraEnabled(false);
+      setFullScreenScanner(false);
       stopWebCamera();
     }
   }
@@ -612,11 +673,14 @@ export function MercadoLivreSeparacaoPage() {
     );
 
     const totalQty = savedOrders.reduce((acc, row) => acc + (Number(row.product_qty) || 0), 0);
+    const packedOrders = savedOrders.reduce((acc, row) => acc + (isOrderPacked(row) ? 1 : 0), 0);
 
     return {
       totalOrders: savedOrders.length,
       totalTrackings: uniqueTrackings.size,
-      totalQty
+      totalQty,
+      packedOrders,
+      unpackedOrders: Math.max(0, savedOrders.length - packedOrders)
     };
   }, [savedOrders]);
 
@@ -678,7 +742,7 @@ export function MercadoLivreSeparacaoPage() {
   }, [previewRows, savedOrders]);
 
   return (
-    <section className="page">
+    <section className="page ml-separacao-page">
       <div className="section-head row-between">
         <div>
           <h2>Separacao de Pedido</h2>
@@ -688,30 +752,40 @@ export function MercadoLivreSeparacaoPage() {
         </div>
       </div>
 
-      <div className="ml-kpi-grid ml-production-kpis">
+      <div className="ml-kpi-grid ml-production-kpis ml-separacao-kpis">
         <article className="kpi-card">
           <p>Pedidos salvos</p>
           <strong>{stats.totalOrders}</strong>
-          <span>Base de pedidos para expedicao</span>
+          <span>Base para expedicao</span>
         </article>
         <article className="kpi-card">
           <p>Rastreios unicos</p>
           <strong>{stats.totalTrackings}</strong>
-          <span>Codigos prontos para busca</span>
+          <span>Codigos para busca</span>
         </article>
         <article className="kpi-card">
           <p>Qtd total de produtos</p>
           <strong>{stats.totalQty}</strong>
-          <span>Soma da coluna Qtd. do Produto</span>
+          <span>Total de itens</span>
         </article>
         <article className="kpi-card">
           <p>Ultima importacao</p>
           <strong>{fileName ? "Pronta" : "-"}</strong>
           <span>{fileName || "Nenhum arquivo importado"}</span>
         </article>
+        <article className="kpi-card">
+          <p>Pedidos Embalados</p>
+          <strong>{stats.packedOrders}</strong>
+          <span>Pedidos marcados como embalados</span>
+        </article>
+        <article className="kpi-card">
+          <p>Pedidos Sem embalar</p>
+          <strong>{stats.unpackedOrders}</strong>
+          <span>Total de pedidos pendentes de embalagem</span>
+        </article>
       </div>
 
-      <div className="soft-panel ml-upload-panel">
+      <div className="soft-panel ml-upload-panel ml-separacao-menu">
         <p>Menu Separacao de Pedido</p>
         <div className="ml-upload-row">
           <label className="primary-btn" style={{ cursor: "pointer" }}>
@@ -750,6 +824,93 @@ export function MercadoLivreSeparacaoPage() {
           </button>
           {fileName && <span className="page-text">Arquivo: {fileName}</span>}
         </div>
+        <div className="ml-upload-row">
+          <button
+            type="button"
+            className={scannerMode ? "primary-btn" : "ghost-btn"}
+            onClick={() => {
+              setScannerMode((prev) => !prev);
+              setScanStatus(null);
+              setTimeout(() => trackingInputRef.current?.focus(), 30);
+            }}
+          >
+            {scannerMode ? "Scanner Android: Ativo" : "Ativar scanner Android"}
+          </button>
+          <label className="field ml-separacao-track-field" style={{ marginBottom: 0 }}>
+            <span>Rastreio</span>
+            <input
+              ref={trackingInputRef}
+              placeholder="Digite ou escaneie o rastreio..."
+              value={trackingSearch}
+              inputMode="search"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              autoComplete="off"
+              onChange={(e) => setTrackingSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  openByTrackingValue(trackingSearch);
+                  setTrackingSearch("");
+                }
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => openByTrackingValue(trackingSearch)}
+            disabled={!normalizeTracking(trackingSearch)}
+          >
+            Buscar agora
+          </button>
+          <button
+            type="button"
+            className={webCameraEnabled ? "primary-btn" : "ghost-btn"}
+            onClick={() => {
+              if (webCameraEnabled && fullScreenScanner) {
+                closeScannerFullscreen();
+              } else {
+                openScannerFullscreen();
+              }
+            }}
+          >
+            {webCameraEnabled && fullScreenScanner ? "Fechar camera web" : "Abrir scanner em tela cheia"}
+          </button>
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => void deleteFilteredOrders()}
+            disabled={deletingFiltered || loadingInit || filteredByTracking.length === 0}
+          >
+            {deletingFiltered ? "Excluindo filtrados..." : "Excluir filtrados"}
+          </button>
+          {scannerMode && (
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => {
+                setTrackingSearch("");
+                setScanStatus(null);
+                trackingInputRef.current?.focus();
+              }}
+            >
+              Limpar
+            </button>
+          )}
+          {scannerMode && (
+            <span className="scan-live-indicator">
+              <i /> Leitura continua habilitada
+            </span>
+          )}
+        </div>
+        {!cameraSupported && (
+          <p className="page-text">
+            Scanner web indisponivel neste navegador. Use Chrome/Edge recente ou scanner via teclado.
+          </p>
+        )}
+        {cameraError && <p className="error-text">{cameraError}</p>}
+        {scanStatus && <p className="page-text">{scanStatus}</p>}
         <span className="page-text">
           Campos importados: N de Pedido da Plataforma, Nome do Anuncio, SKU, Variacao, Link da Imagem, Notas do Comprador,
           Observacoes, Qtd. do Produto, Nome do Destinatario e N de Rastreio (quando existir).
@@ -828,102 +989,6 @@ export function MercadoLivreSeparacaoPage() {
           <h3>Buscar por N de Rastreio</h3>
           <span>{filteredByTracking.length} resultado(s)</span>
         </div>
-
-        <div className="ml-upload-row" style={{ marginBottom: "0.9rem" }}>
-          <button
-            type="button"
-            className={scannerMode ? "primary-btn" : "ghost-btn"}
-            onClick={() => {
-              setScannerMode((prev) => !prev);
-              setScanStatus(null);
-              setTimeout(() => trackingInputRef.current?.focus(), 30);
-            }}
-          >
-            {scannerMode ? "Scanner Android: Ativo" : "Ativar scanner Android"}
-          </button>
-          {scannerMode && (
-            <span className="scan-live-indicator">
-              <i /> Leitura continua habilitada
-            </span>
-          )}
-        </div>
-
-        <div className="ml-upload-row" style={{ marginBottom: "0.9rem" }}>
-          <label className="field" style={{ maxWidth: 360, marginBottom: 0 }}>
-            <span>Rastreio</span>
-            <input
-              ref={trackingInputRef}
-              placeholder="Digite ou escaneie o rastreio..."
-              value={trackingSearch}
-              inputMode="search"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              autoComplete="off"
-              onChange={(e) => setTrackingSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  openByTrackingValue(trackingSearch);
-                  setTrackingSearch("");
-                }
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            className="ghost-btn"
-            onClick={() => openByTrackingValue(trackingSearch)}
-            disabled={!normalizeTracking(trackingSearch)}
-          >
-            Buscar agora
-          </button>
-          {scannerMode && (
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => {
-                setTrackingSearch("");
-                setScanStatus(null);
-                trackingInputRef.current?.focus();
-              }}
-            >
-              Limpar
-            </button>
-          )}
-          <button
-            type="button"
-            className={webCameraEnabled ? "primary-btn" : "ghost-btn"}
-            onClick={() => {
-              setWebCameraEnabled((prev) => !prev);
-              setCameraError(null);
-            }}
-          >
-            {webCameraEnabled ? "Camera Web: Ativa" : "Ativar camera web"}
-          </button>
-          <button
-            type="button"
-            className="ghost-btn"
-            onClick={() => void deleteFilteredOrders()}
-            disabled={deletingFiltered || loadingInit || filteredByTracking.length === 0}
-          >
-            {deletingFiltered ? "Excluindo filtrados..." : "Excluir filtrados"}
-          </button>
-        </div>
-        {webCameraEnabled && (
-          <div className="ml-camera-panel">
-            <video ref={cameraVideoRef} className="ml-camera-video" muted />
-            <div className="ml-camera-help">
-              Aponte a camera para o codigo de barras/rastreio para preencher automaticamente.
-            </div>
-          </div>
-        )}
-        {!cameraSupported && (
-          <p className="page-text">
-            Scanner web indisponivel neste navegador. Use Chrome/Edge recente ou scanner via teclado.
-          </p>
-        )}
-        {cameraError && <p className="error-text">{cameraError}</p>}
-        {scanStatus && <p className="page-text">{scanStatus}</p>}
 
         <div className="table-wrap">
           <table className="table clean ml-shipping-table">
@@ -1021,6 +1086,39 @@ export function MercadoLivreSeparacaoPage() {
         </div>
       </div>
 
+      <button
+        type="button"
+        className={fullScreenScanner && webCameraEnabled ? "ml-scan-fab active" : "ml-scan-fab"}
+        onClick={() => {
+          if (fullScreenScanner && webCameraEnabled) {
+            closeScannerFullscreen();
+          } else {
+            openScannerFullscreen();
+          }
+        }}
+        aria-label={fullScreenScanner && webCameraEnabled ? "Fechar scanner" : "Abrir scanner"}
+        title={fullScreenScanner && webCameraEnabled ? "Fechar scanner" : "Abrir scanner"}
+      >
+        <span className="ml-scan-icon" aria-hidden>
+          |||
+        </span>
+      </button>
+
+      {fullScreenScanner && (
+        <div className="ml-scan-overlay" onClick={closeScannerFullscreen}>
+          <div className="ml-scan-overlay-inner" onClick={(e) => e.stopPropagation()}>
+            <div className="ml-scan-overlay-head">
+              <strong>Scanner de rastreio</strong>
+              <button type="button" className="ghost-btn" onClick={closeScannerFullscreen}>
+                Fechar
+              </button>
+            </div>
+            <video ref={cameraVideoRef} className="ml-scan-overlay-video" muted />
+            <div className="ml-scan-overlay-help">Centralize o codigo no quadro. A leitura fecha a camera automaticamente.</div>
+          </div>
+        </div>
+      )}
+
       {selectedOrder && (
         <div className="assistant-modal-backdrop" onClick={() => setSelectedOrder(null)}>
           <article className="assistant-modal ml-shipping-modal" onClick={(e) => e.stopPropagation()}>
@@ -1057,8 +1155,17 @@ export function MercadoLivreSeparacaoPage() {
                 <p><strong>Anuncio:</strong> {selectedOrder.ad_name || "-"}</p>
                 <p><strong>Variacao:</strong> {selectedOrder.variation || "-"}</p>
                 <p><strong>Quantidade:</strong> {selectedOrder.product_qty || 1}</p>
+                <p><strong>Status:</strong> {isOrderPacked(selectedOrder) ? "Embalado" : "Pendente"}</p>
                 <p><strong>Notas do comprador:</strong> {selectedOrder.buyer_notes || "-"}</p>
                 <p><strong>Observacoes:</strong> {selectedOrder.observations || "-"}</p>
+                <button
+                  type="button"
+                  className={isOrderPacked(selectedOrder) ? "ghost-btn" : "primary-btn"}
+                  disabled={isOrderPacked(selectedOrder) || packingOrderId === selectedOrder.id}
+                  onClick={() => void markOrderAsPacked(selectedOrder)}
+                >
+                  {packingOrderId === selectedOrder.id ? "Salvando..." : "Pedido Embalado"}
+                </button>
               </div>
             </div>
           </article>
