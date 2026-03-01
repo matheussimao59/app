@@ -171,14 +171,16 @@ export function AppLayout() {
       {menuOpen && <button className="mobile-overlay" type="button" onClick={closeMenu} />}
 
       <main className="content">
-        <button
-          className="mobile-menu-btn"
-          type="button"
-          onClick={() => setMenuOpen((prev) => !prev)}
-          aria-label="Abrir menu"
-        >
-          {menuOpen ? "Fechar" : "Menu"}
-        </button>
+        <div className="mobile-utility-bar">
+          <button
+            className="mobile-menu-btn"
+            type="button"
+            onClick={() => setMenuOpen((prev) => !prev)}
+            aria-label="Abrir menu"
+          >
+            {menuOpen ? "Fechar" : "Menu"}
+          </button>
+        </div>
         <Outlet />
       </main>
     </div>

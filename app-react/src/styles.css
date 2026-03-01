@@ -2913,6 +2913,10 @@ body {
   display: none;
 }
 
+.mobile-utility-bar {
+  display: none;
+}
+
 .mobile-topbar-text h1 {
   margin: 0;
   font-size: 1.02rem;
@@ -4300,24 +4304,41 @@ body {
   }
 
   .content {
-    padding: 12px 10px 12px !important;
+    padding: 74px 10px 12px !important;
     min-height: 100dvh;
+  }
+
+  .mobile-utility-bar {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    height: 46px;
+    border: 1px solid #dbe4ef;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 6px 16px rgba(2, 6, 23, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 4px 8px;
+    z-index: 139;
   }
 
   .mobile-menu-btn {
     display: inline-flex;
-    position: fixed;
-    top: 10px;
-    left: 10px;
+    position: static;
     z-index: 140;
     min-width: 72px;
-    box-shadow: 0 6px 16px rgba(2, 6, 23, 0.16);
+    box-shadow: none;
     background: #ffffff;
   }
 
   .top-account {
-    top: 10px;
-    right: 10px;
+    top: 14px;
+    right: 14px;
+    z-index: 141;
   }
 
   .top-account-btn {
@@ -4326,7 +4347,7 @@ body {
   }
 
   .top-account-pop {
-    top: 44px;
+    top: 48px;
     right: 0;
     min-width: 190px;
     max-width: min(260px, 82vw);
@@ -4680,11 +4701,22 @@ body {
     width: 100%;
     min-width: 0;
     white-space: normal;
-    line-height: 1.2;
+    line-height: 1.15;
+    min-height: 34px !important;
+    padding: 7px 8px !important;
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    border-radius: 8px;
+    gap: 6px;
   }
 
   .calendar-flow-header-actions > button:nth-child(3) {
     grid-column: 1 / -1;
+  }
+
+  .calendar-flow-header-actions .calendar-btn-icon {
+    width: 13px;
+    height: 13px;
   }
 
   .calendar-flow-grid {
@@ -4695,15 +4727,55 @@ body {
   .calendar-flow-grid > * {
     min-width: 0;
   }
+
+  .calendar-card-head {
+    padding: 8px 9px;
+  }
+
+  .calendar-card-head strong {
+    font-size: 0.8rem;
+  }
+
+  .calendar-card-head span {
+    font-size: 0.72rem;
+  }
+
+  .calendar-mark-btn {
+    margin: 8px 8px 6px;
+    width: calc(100% - 16px);
+    min-height: 28px;
+    font-size: 0.7rem;
+    border-radius: 7px;
+    padding: 4px 6px;
+    gap: 4px;
+  }
+
+  .calendar-card-actions {
+    padding: 0 8px;
+    gap: 5px;
+  }
+
+  .calendar-pdf-btn,
+  .calendar-mockup-btn {
+    min-height: 32px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    border-radius: 7px;
+    padding: 4px 6px;
+    white-space: normal;
+    line-height: 1.1;
+    text-align: center;
+  }
+
+  .calendar-delete-link {
+    font-size: 0.74rem;
+    padding: 8px 6px;
+  }
 }
 
 @media (max-width: 430px) {
   .calendar-flow-header-actions {
-    grid-template-columns: 1fr;
-  }
-
-  .calendar-flow-header-actions > button:nth-child(3) {
-    grid-column: auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .calendar-flow-grid {
@@ -4711,12 +4783,21 @@ body {
     gap: 8px;
   }
 
-  .calendar-card {
-    padding: 8px;
+  .calendar-thumb-wrap {
+    height: 108px !important;
   }
 
-  .calendar-thumb-wrap {
-    height: 118px !important;
+  .calendar-mark-btn {
+    min-height: 26px;
+    font-size: 0.66rem;
+    padding: 3px 5px;
+  }
+
+  .calendar-pdf-btn,
+  .calendar-mockup-btn {
+    font-size: 0.68rem;
+    min-height: 30px;
+    padding: 3px 5px;
   }
 }
 
