@@ -1555,6 +1555,17 @@ body {
   gap: 7px 10px;
 }
 
+.ml-packed-order-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ml-packed-order-actions .ghost-btn {
+  flex: 1;
+  min-width: 170px;
+}
+
 .scan-live-indicator {
   display: inline-flex;
   align-items: center;
@@ -1827,6 +1838,16 @@ body {
   .ml-packed-order-grid {
     grid-template-columns: 1fr;
     gap: 5px;
+  }
+
+  .ml-packed-order-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .ml-packed-order-actions .ghost-btn {
+    min-width: 0;
+    width: 100%;
   }
 }
 

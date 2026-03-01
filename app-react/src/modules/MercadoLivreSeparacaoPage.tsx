@@ -237,6 +237,7 @@ export function MercadoLivreSeparacaoPage() {
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [deletingFiltered, setDeletingFiltered] = useState(false);
   const [packingOrderId, setPackingOrderId] = useState<string | null>(null);
+  const [unpackingOrderId, setUnpackingOrderId] = useState<string | null>(null);
   const [webCameraEnabled, setWebCameraEnabled] = useState(false);
   const [fullScreenScanner, setFullScreenScanner] = useState(false);
   const [cameraSupported, setCameraSupported] = useState(true);
@@ -523,6 +524,44 @@ export function MercadoLivreSeparacaoPage() {
       setError(`Nao foi possivel marcar como embalado: ${message}`);
     } finally {
       setPackingOrderId(null);
+    }
+  }
+
+  async function cancelOrderPacking(row: ShippingOrder) {
+    if (!supabase || !userId) return;
+    if (!isOrderPacked(row)) {
+      setStatus("Este pedido ainda nao esta embalado.");
+      return;
+    }
+
+    setUnpackingOrderId(row.id);
+    setError(null);
+    setStatus(null);
+
+    try {
+      const nextRaw = { ...(row.row_raw || {}) };
+      delete nextRaw.packed;
+      delete nextRaw.packed_at;
+
+      const { error: updateError, data } = await supabase
+        .from("ml_shipping_orders")
+        .update({ row_raw: nextRaw, updated_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .eq("id", row.id)
+        .select("*")
+        .single();
+
+      if (updateError) throw new Error(updateError.message);
+
+      const updated = (data || { ...row, row_raw: nextRaw }) as ShippingOrder;
+      setSavedOrders((prev) => prev.map((item) => (item.id === row.id ? updated : item)));
+      if (selectedOrder?.id === row.id) setSelectedOrder(updated);
+      setStatus("Embalagem cancelada com sucesso.");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Falha ao cancelar embalagem.";
+      setError(`Nao foi possivel cancelar embalagem: ${message}`);
+    } finally {
+      setUnpackingOrderId(null);
     }
   }
 
@@ -1180,6 +1219,16 @@ export function MercadoLivreSeparacaoPage() {
                 >
                   {packingOrderId === selectedOrder.id ? "Salvando..." : "Pedido Embalado"}
                 </button>
+                {isOrderPacked(selectedOrder) && (
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    disabled={unpackingOrderId === selectedOrder.id}
+                    onClick={() => void cancelOrderPacking(selectedOrder)}
+                  >
+                    {unpackingOrderId === selectedOrder.id ? "Cancelando..." : "Cancelar embalagem"}
+                  </button>
+                )}
               </div>
             </div>
           </article>
@@ -1243,9 +1292,19 @@ export function MercadoLivreSeparacaoPage() {
                         <p><strong>Notas:</strong> {row.buyer_notes || "-"}</p>
                         <p><strong>Observacoes:</strong> {row.observations || "-"}</p>
                       </div>
-                      <button type="button" className="ghost-btn" onClick={() => setSelectedOrder(row)}>
-                        Ver detalhes
-                      </button>
+                      <div className="ml-packed-order-actions">
+                        <button type="button" className="ghost-btn" onClick={() => setSelectedOrder(row)}>
+                          Ver detalhes
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          disabled={unpackingOrderId === row.id}
+                          onClick={() => void cancelOrderPacking(row)}
+                        >
+                          {unpackingOrderId === row.id ? "Cancelando..." : "Cancelar embalagem"}
+                        </button>
+                      </div>
                     </article>
                   );
                 })
