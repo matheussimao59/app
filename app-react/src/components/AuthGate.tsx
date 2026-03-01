@@ -49,6 +49,15 @@ export function AuthGate({ children }: AuthGateProps) {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [accountOpen]);
 
+  useEffect(() => {
+    function onAccountToggle() {
+      setAccountOpen((prev) => !prev);
+    }
+
+    window.addEventListener("app-account-toggle", onAccountToggle as EventListener);
+    return () => window.removeEventListener("app-account-toggle", onAccountToggle as EventListener);
+  }, []);
+
   const info = useMemo(() => {
     if (hasSupabaseConfig) return null;
     return "Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no arquivo .env.";

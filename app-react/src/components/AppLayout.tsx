@@ -76,6 +76,15 @@ function NavIcon({ id }: { id: string }) {
     );
   }
 
+  if (id === "pedidos") {
+    return (
+      <svg {...props}>
+        <rect x="4" y="4.5" width="16" height="15" rx="2" />
+        <path d="M8 8.5h8M8 12h8M8 15.5h5" />
+      </svg>
+    );
+  }
+
   return (
     <svg {...props}>
       <circle cx="12" cy="12" r="3.2" />
@@ -95,12 +104,17 @@ export function AppLayout() {
     { id: "precificacao", label: "Precificacao", path: "/precificacao" },
     { id: "calendario", label: "Calendario", path: "/calendario" },
     { id: "produtos", label: "Meus Produtos", path: "/produtos" },
+    { id: "pedidos", label: "Pedidos", path: "/pedidos/pendentes" },
     { id: "teste_impressao", label: "Teste de Impressao", path: "/teste-impressao" },
     { id: "configuracoes", label: "Configuracoes", path: "/configuracoes" }
   ];
 
   function closeMenu() {
     setMenuOpen(false);
+  }
+
+  function openAccountMenu() {
+    window.dispatchEvent(new CustomEvent("app-account-toggle"));
   }
 
   return (
@@ -171,16 +185,53 @@ export function AppLayout() {
       {menuOpen && <button className="mobile-overlay" type="button" onClick={closeMenu} />}
 
       <main className="content">
-        <div className="mobile-utility-bar">
+        <nav className="mobile-footer-bar" aria-label="Atalhos mobile">
           <button
-            className="mobile-menu-btn"
+            className="mobile-footer-item mobile-menu-btn"
             type="button"
             onClick={() => setMenuOpen((prev) => !prev)}
             aria-label="Abrir menu"
           >
-            {menuOpen ? "Fechar" : "Menu"}
+            <span className="mobile-footer-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 7h16M4 12h16M4 17h16" />
+              </svg>
+            </span>
+            <span>{menuOpen ? "Fechar" : "Menu"}</span>
           </button>
-        </div>
+          <NavLink
+            to="/produtos"
+            className={({ isActive }) => (isActive ? "mobile-footer-item active" : "mobile-footer-item")}
+          >
+            <span className="mobile-footer-icon"><NavIcon id="produtos" /></span>
+            <span>Produtos</span>
+          </NavLink>
+          <NavLink
+            to="/pedidos/pendentes"
+            className={({ isActive }) =>
+              isActive || location.pathname.startsWith("/pedidos")
+                ? "mobile-footer-item active"
+                : "mobile-footer-item"
+            }
+          >
+            <span className="mobile-footer-icon"><NavIcon id="pedidos" /></span>
+            <span>Pedidos</span>
+          </NavLink>
+          <button
+            className="mobile-footer-item mobile-account-trigger"
+            type="button"
+            onClick={openAccountMenu}
+            aria-label="Conta"
+          >
+            <span className="mobile-footer-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="12" cy="8" r="3.2" />
+                <path d="M4.8 19.2c1.2-3 3.8-4.7 7.2-4.7s6 1.7 7.2 4.7" />
+              </svg>
+            </span>
+            <span>Conta</span>
+          </button>
+        </nav>
         <Outlet />
       </main>
     </div>

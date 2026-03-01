@@ -621,7 +621,7 @@ export function ProductsPage() {
   }
 
   return (
-    <section className="page">
+    <section className="page products-page">
       <div className="products-head">
         <div>
           <h2>Meus Produtos</h2>

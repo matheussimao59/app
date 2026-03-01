@@ -1,5 +1,4 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import { NavLink } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
 type OrderItem = {
@@ -7,6 +6,7 @@ type OrderItem = {
   quantity?: number;
   unit_price?: number;
   seller_sku?: string;
+  thumbnail?: string;
 };
 
 type Order = {
@@ -41,6 +41,13 @@ type OrderOpsRecord = {
 };
 
 type OrderOpsMap = Record<string, OrderOpsRecord>;
+type DebugInfo = {
+  source: "ml-sync" | "cache" | "empty";
+  totalLoaded: number;
+  totalPendingShipment: number;
+  statuses: Array<{ status: string; count: number }>;
+  sample: Array<{ id: number; status: string; date: string }>;
+};
 
 function ordersCacheKey(userId: string) {
   return `ml_orders_cache_${userId}`;
@@ -151,18 +158,34 @@ function filterOrdersByMode(orders: Order[], mode: PedidosMode, opsMap: OrderOps
   });
 }
 
+function isPendingShipment(order: Order) {
+  const status = normalizeStatus(order.status);
+  if (status.includes("cancel")) return false;
+  if (isSentStatus(status)) return false;
+  // Mercado Livre pode retornar "paid/confirmed/handling" antes de "ready_to_ship".
+  return (
+    status.includes("ready_to_ship") ||
+    status.includes("to_be_agreed") ||
+    status.includes("paid") ||
+    status.includes("confirmed") ||
+    status.includes("handling") ||
+    status.includes("in_process")
+  );
+}
+
 function orderSummary(order: Order) {
   const first = order.order_items?.[0];
   const item = first?.item;
   const title = item?.title || "Produto sem titulo";
   const qty = Number(first?.quantity ?? item?.quantity) || 0;
   const sku = item?.seller_sku || "-";
+  const thumb = String(item?.thumbnail || "").trim();
   const amount = Number(order.total_amount) || 0;
   const buyerName =
     order.buyer?.nickname ||
     [order.buyer?.first_name, order.buyer?.last_name].filter(Boolean).join(" ") ||
     "Cliente";
-  return { title, qty, sku, amount, buyerName };
+  return { title, qty, sku, thumb, amount, buyerName };
 }
 
 function openLabelPrint(orders: Order[]) {
@@ -221,7 +244,7 @@ function openLabelPrint(orders: Order[]) {
   popup.document.close();
 }
 
-export function PedidosPage({ mode }: Props) {
+export function PedidosPage({ mode: _mode }: Props) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -229,6 +252,7 @@ export function PedidosPage({ mode }: Props) {
   const [opsMap, setOpsMap] = useState<OrderOpsMap>({});
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [statusInfo, setStatusInfo] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
   const [nfOrderId, setNfOrderId] = useState<number | null>(null);
   const [nfNumber, setNfNumber] = useState("");
   const [nfKey, setNfKey] = useState("");
@@ -256,6 +280,7 @@ export function PedidosPage({ mode }: Props) {
       setUserId(uid);
 
       let loadedOrders: Order[] = [];
+      let source: DebugInfo["source"] = "empty";
 
       try {
         const { data: tokenRow } = await supabase
@@ -281,6 +306,7 @@ export function PedidosPage({ mode }: Props) {
           if (!syncError) {
             loadedOrders = (((syncPayload || {}) as { orders?: Order[] }).orders || []) as Order[];
             localStorage.setItem(ordersCacheKey(uid), JSON.stringify(loadedOrders));
+            source = "ml-sync";
           }
         }
       } catch {
@@ -292,13 +318,34 @@ export function PedidosPage({ mode }: Props) {
           const rawOrders = localStorage.getItem(ordersCacheKey(uid));
           const parsedOrders = rawOrders ? (JSON.parse(rawOrders) as Order[]) : [];
           loadedOrders = Array.isArray(parsedOrders) ? parsedOrders : [];
+          if (loadedOrders.length > 0) source = "cache";
         } catch {
           loadedOrders = [];
         }
       }
 
       if (!mounted) return;
-      setOrders(loadedOrders);
+      const onlyPendingShipment = loadedOrders.filter((order) => isPendingShipment(order));
+      setOrders(onlyPendingShipment);
+      const statusMap = new Map<string, number>();
+      for (const order of loadedOrders) {
+        const key = normalizeStatus(order.status) || "(vazio)";
+        statusMap.set(key, (statusMap.get(key) || 0) + 1);
+      }
+      const statuses = [...statusMap.entries()]
+        .map(([status, count]) => ({ status, count }))
+        .sort((a, b) => b.count - a.count);
+      setDebugInfo({
+        source,
+        totalLoaded: loadedOrders.length,
+        totalPendingShipment: onlyPendingShipment.length,
+        statuses,
+        sample: loadedOrders.slice(0, 15).map((order) => ({
+          id: Number(order.id) || 0,
+          status: normalizeStatus(order.status) || "(vazio)",
+          date: fmtDate(order.date_created)
+        }))
+      });
 
       try {
         const { data: opsRow } = await supabase
@@ -356,21 +403,12 @@ export function PedidosPage({ mode }: Props) {
     }
   }
 
-  const modeCounts = useMemo(() => {
-    return {
-      pendentes: filterOrdersByMode(orders, "pendentes", opsMap).length,
-      "nota-fiscal": filterOrdersByMode(orders, "nota-fiscal", opsMap).length,
-      imprimir: filterOrdersByMode(orders, "imprimir", opsMap).length,
-      retirada: filterOrdersByMode(orders, "retirada", opsMap).length
-    } as const;
-  }, [orders, opsMap]);
-
-  const filtered = useMemo(() => filterOrdersByMode(orders, mode, opsMap), [orders, mode, opsMap]);
+  const pendingOnly = useMemo(() => orders.filter((order) => isPendingShipment(order)), [orders]);
 
   const searched = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return filtered;
-    return filtered.filter((order) => {
+    if (!q) return pendingOnly;
+    return pendingOnly.filter((order) => {
       const row = orderSummary(order);
       return (
         String(order.id).includes(q) ||
@@ -379,7 +417,7 @@ export function PedidosPage({ mode }: Props) {
         row.buyerName.toLowerCase().includes(q)
       );
     });
-  }, [filtered, search]);
+  }, [pendingOnly, search]);
 
   useEffect(() => {
     setSelectedIds((prev) => prev.filter((id) => searched.some((o) => o.id === id)));
@@ -461,37 +499,47 @@ export function PedidosPage({ mode }: Props) {
 
   return (
     <section className="page pedidos-page">
-      <div className="pedidos-layout">
-        <aside className="pedidos-stage-col">
-          <h3>Pedidos</h3>
-          <p>Fluxo operacional</p>
-
-          <div className="pedidos-stage-group">
-            <span>Total pedidos</span>
-            <NavLink to="/pedidos/pendentes" className={({ isActive }) => (isActive && mode === "pendentes" ? "pedidos-stage-item active" : "pedidos-stage-item")}>Pendentes <b>{modeCounts.pendentes}</b></NavLink>
+      <div className="pedidos-main-col">
+        <header className="pedidos-toolbar">
+          <div>
+            <h2>Pedidos pendentes de envio</h2>
+            <p className="page-text">Mostra pedidos não enviados e não cancelados (pagos/confirmados/em preparação).</p>
           </div>
-
-          <div className="pedidos-stage-group">
-            <span>Processando</span>
-            <NavLink to="/pedidos/nota-fiscal" className={({ isActive }) => (isActive && mode === "nota-fiscal" ? "pedidos-stage-item active" : "pedidos-stage-item")}>Para emitir NF <b>{modeCounts["nota-fiscal"]}</b></NavLink>
-            <NavLink to="/pedidos/imprimir" className={({ isActive }) => (isActive && mode === "imprimir" ? "pedidos-stage-item active" : "pedidos-stage-item")}>Para imprimir <b>{modeCounts.imprimir}</b></NavLink>
-            <NavLink to="/pedidos/retirada" className={({ isActive }) => (isActive && mode === "retirada" ? "pedidos-stage-item active" : "pedidos-stage-item")}>Para retirada <b>{modeCounts.retirada}</b></NavLink>
+          <div className="pedidos-toolbar-actions">
+            <input
+              className="products-search"
+              placeholder="Buscar por pedido, cliente, SKU ou titulo"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <button
+              type="button"
+              className="ghost-btn"
+              disabled={selectedOrders.length === 0}
+              onClick={() => {
+                openLabelPrint(selectedOrders);
+                markLabelPrinted(selectedOrders.map((o) => o.id));
+              }}
+            >
+              Imprimir em massa ({selectedOrders.length})
+            </button>
           </div>
-        </aside>
+        </header>
 
-        <div className="pedidos-main-col">
-          <header className="pedidos-toolbar">
-            <div>
-              <h2>{modeTitle(mode)}</h2>
-              <p className="page-text">Painel operacional inspirado em fluxo de expedição.</p>
-            </div>
-            <div className="pedidos-toolbar-actions">
-              <input
-                className="products-search"
-                placeholder="Buscar por pedido, cliente, SKU ou titulo"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+        {loading && <p className="page-text">Carregando pedidos...</p>}
+        {!loading && error && <p className="error-text">{error}</p>}
+        {statusInfo && <p className="page-text">{statusInfo}</p>}
+        {!loading && !error && searched.length === 0 && (
+          <p className="page-text">Nenhum pedido pendente de envio encontrado.</p>
+        )}
+
+        {!loading && !error && searched.length > 0 && (
+          <div className="pedidos-table-wrap">
+            <div className="pedidos-bulkbar">
+              <span>{selectedIds.length} selecionado(s)</span>
+              <button type="button" className="ghost-btn" onClick={toggleSelectAll}>
+                {selectedIds.length === searched.length ? "Desmarcar todos" : "Selecionar todos"}
+              </button>
               <button
                 type="button"
                 className="ghost-btn"
@@ -501,131 +549,119 @@ export function PedidosPage({ mode }: Props) {
                   markLabelPrinted(selectedOrders.map((o) => o.id));
                 }}
               >
-                Imprimir em massa ({selectedOrders.length})
+                Imprimir etiquetas
               </button>
             </div>
-          </header>
 
-          <div className="pedidos-tabs-row">
-            {([
-              { id: "pendentes", label: "Pendentes" },
-              { id: "nota-fiscal", label: "Para emitir" },
-              { id: "imprimir", label: "Para imprimir" },
-              { id: "retirada", label: "Retirada" }
-            ] as Array<{ id: PedidosMode; label: string }>).map((tab) => (
-              <NavLink
-                key={tab.id}
-                to={modePath(tab.id)}
-                className={({ isActive }) => (isActive ? "pedidos-tab-chip active" : "pedidos-tab-chip")}
-              >
-                {tab.label}
-                <strong>{modeCounts[tab.id]}</strong>
-              </NavLink>
-            ))}
+            <div className="pedidos-grid">
+              {searched.map((order) => {
+                const row = orderSummary(order);
+                const ops = opsMap[String(order.id)] || {};
+                return (
+                  <article key={order.id} className="pedidos-card">
+                    <label className="pedidos-card-check">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(order.id)}
+                        onChange={() => toggleSelect(order.id)}
+                      />
+                      <span>Selecionar</span>
+                    </label>
+
+                    <div className="pedidos-card-head">
+                      <strong>#{order.id}</strong>
+                      <span>{fmtDate(order.date_created)}</span>
+                    </div>
+
+                    <div className="pedidos-card-media">
+                      {row.thumb ? (
+                        <img src={row.thumb} alt={row.title} loading="lazy" />
+                      ) : (
+                        <div className="pedidos-card-noimg">Sem foto</div>
+                      )}
+                    </div>
+
+                    <div className="pedidos-card-body">
+                      <h4>{row.title}</h4>
+                      <p><b>Cliente:</b> {row.buyerName}</p>
+                      <p><b>SKU:</b> {row.sku}</p>
+                      <p><b>Qtd:</b> {row.qty} <b>Valor:</b> {fmtMoney(row.amount)}</p>
+                    </div>
+
+                    <div className="pedidos-status-stack">
+                      <span className={ops.invoiceIssuedAt ? "chip active" : "chip"}>
+                        {ops.invoiceIssuedAt ? `NF ${ops.invoiceNumber || "emitida"}` : "NF pendente"}
+                      </span>
+                      <span className={ops.labelPrintedAt ? "chip active" : "chip"}>
+                        {ops.labelPrintedAt ? "Etiqueta ok" : "Sem etiqueta"}
+                      </span>
+                    </div>
+
+                    <div className="materials-actions-cell pedidos-actions-cell">
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={() => {
+                          openLabelPrint([order]);
+                          markLabelPrinted([order.id]);
+                        }}
+                      >
+                        Etiqueta
+                      </button>
+                      <button type="button" className="ghost-btn" onClick={() => openEmitNf(order.id)}>
+                        Emitir NF
+                      </button>
+                      <button type="button" className="ghost-btn" onClick={() => togglePickup(order.id)}>
+                        {ops.pickupReady ? "Retirada ok" : "Retirada"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
           </div>
+        )}
 
-          {loading && <p className="page-text">Carregando pedidos...</p>}
-          {!loading && error && <p className="error-text">{error}</p>}
-          {statusInfo && <p className="page-text">{statusInfo}</p>}
-          {!loading && !error && searched.length === 0 && (
-            <p className="page-text">Nenhum pedido encontrado nesta categoria.</p>
-          )}
-
-          {!loading && !error && searched.length > 0 && (
-            <div className="pedidos-table-wrap">
-              <div className="pedidos-bulkbar">
-                <span>{selectedIds.length} selecionado(s)</span>
-                <button type="button" className="ghost-btn" onClick={toggleSelectAll}>
-                  {selectedIds.length === searched.length ? "Desmarcar todos" : "Selecionar todos"}
-                </button>
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  disabled={selectedOrders.length === 0}
-                  onClick={() => {
-                    openLabelPrint(selectedOrders);
-                    markLabelPrinted(selectedOrders.map((o) => o.id));
-                  }}
-                >
-                  Imprimir etiquetas
-                </button>
+        {debugInfo && (
+          <details className="pedidos-debug" open>
+            <summary>Debug da busca de pedidos</summary>
+            <p className="page-text">
+              Fonte: <b>{debugInfo.source}</b> | Total recebido: <b>{debugInfo.totalLoaded}</b> | Pendentes de envio:
+              {" "}
+              <b>{debugInfo.totalPendingShipment}</b>
+            </p>
+            <div className="pedidos-debug-grid">
+              <div>
+                <h4>Status recebidos</h4>
+                {debugInfo.statuses.length === 0 ? (
+                  <p className="page-text">Nenhum status recebido.</p>
+                ) : (
+                  <ul>
+                    {debugInfo.statuses.map((row) => (
+                      <li key={row.status}>
+                        <code>{row.status}</code> - {row.count}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
-
-              <div className="table-wrap">
-                <table className="table clean pedidos-table">
-                  <thead>
-                    <tr>
-                      <th></th>
-                      <th>Produto</th>
-                      <th>Pedido</th>
-                      <th>Cliente</th>
-                      <th>SKU</th>
-                      <th>Data</th>
-                      <th>Qtd</th>
-                      <th>Valor</th>
-                      <th>Operacao</th>
-                      <th>Acoes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {searched.map((order) => {
-                      const row = orderSummary(order);
-                      const ops = opsMap[String(order.id)] || {};
-                      return (
-                        <tr key={order.id}>
-                          <td>
-                            <input
-                              type="checkbox"
-                              checked={selectedIds.includes(order.id)}
-                              onChange={() => toggleSelect(order.id)}
-                            />
-                          </td>
-                          <td className="pedidos-title-col">{row.title}</td>
-                          <td>#{order.id}</td>
-                          <td>{row.buyerName}</td>
-                          <td>{row.sku}</td>
-                          <td>{fmtDate(order.date_created)}</td>
-                          <td>{row.qty}</td>
-                          <td>{fmtMoney(row.amount)}</td>
-                          <td>
-                            <div className="pedidos-status-stack">
-                              <span className={ops.invoiceIssuedAt ? "chip active" : "chip"}>
-                                {ops.invoiceIssuedAt ? `NF ${ops.invoiceNumber || "emitida"}` : "NF pendente"}
-                              </span>
-                              <span className={ops.labelPrintedAt ? "chip active" : "chip"}>
-                                {ops.labelPrintedAt ? "Etiqueta ok" : "Sem etiqueta"}
-                              </span>
-                            </div>
-                          </td>
-                          <td>
-                            <div className="materials-actions-cell pedidos-actions-cell">
-                              <button
-                                type="button"
-                                className="ghost-btn"
-                                onClick={() => {
-                                  openLabelPrint([order]);
-                                  markLabelPrinted([order.id]);
-                                }}
-                              >
-                                Etiqueta
-                              </button>
-                              <button type="button" className="ghost-btn" onClick={() => openEmitNf(order.id)}>
-                                Emitir NF
-                              </button>
-                              <button type="button" className="ghost-btn" onClick={() => togglePickup(order.id)}>
-                                {ops.pickupReady ? "Retirada ok" : "Retirada"}
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div>
+                <h4>Amostra de pedidos</h4>
+                {debugInfo.sample.length === 0 ? (
+                  <p className="page-text">Sem pedidos na amostra.</p>
+                ) : (
+                  <ul>
+                    {debugInfo.sample.map((row) => (
+                      <li key={String(row.id)}>
+                        #{row.id} - <code>{row.status}</code> - {row.date}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
-          )}
-        </div>
+          </details>
+        )}
       </div>
 
       {nfOrderId && (

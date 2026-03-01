@@ -11,6 +11,7 @@ import { MercadoLivreMensagensPage } from "./modules/MercadoLivreMensagensPage";
 import { MercadoLivreSeparacaoPage } from "./modules/MercadoLivreSeparacaoPage";
 import { TesteImpressaoPage } from "./modules/TesteImpressaoPage";
 import { NotaFiscalPage } from "./modules/NotaFiscalPage";
+import { PedidosPage } from "./modules/PedidosPage";
 
 const isLocalNfEnabled = Boolean((import.meta as any)?.env?.DEV);
 
@@ -30,6 +31,11 @@ export function App() {
             <Route path="mercado-livre/enviar-pedido" element={<MercadoLivreSeparacaoPage />} />
             <Route path="mercado-livre/separacao-producao" element={<MercadoLivreSeparacaoPage />} />
             <Route path="mercado-livre/separacao-pedido" element={<MercadoLivreSeparacaoPage />} />
+            <Route path="pedidos" element={<Navigate to="/pedidos/pendentes" replace />} />
+            <Route path="pedidos/pendentes" element={<PedidosPage mode="pendentes" />} />
+            <Route path="pedidos/nota-fiscal" element={<PedidosPage mode="nota-fiscal" />} />
+            <Route path="pedidos/imprimir" element={<PedidosPage mode="imprimir" />} />
+            <Route path="pedidos/retirada" element={<PedidosPage mode="retirada" />} />
             {isLocalNfEnabled && <Route path="nota-fiscal" element={<NotaFiscalPage />} />}
             <Route path="teste-impressao" element={<TesteImpressaoPage />} />
             <Route path="configuracoes" element={<SettingsPage />} />
