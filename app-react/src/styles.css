@@ -1566,6 +1566,11 @@ body {
   min-width: 170px;
 }
 
+.ml-packed-order-actions .primary-btn {
+  flex: 1;
+  min-width: 170px;
+}
+
 .scan-live-indicator {
   display: inline-flex;
   align-items: center;
@@ -1846,6 +1851,11 @@ body {
   }
 
   .ml-packed-order-actions .ghost-btn {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .ml-packed-order-actions .primary-btn {
     min-width: 0;
     width: 100%;
   }
