@@ -4667,3 +4667,56 @@ body {
   }
 }
 
+/* Calendar mobile/tablet hard-fix */
+@media (max-width: 980px) {
+  .calendar-flow-header-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+
+  .calendar-flow-header-actions > button {
+    width: 100%;
+    min-width: 0;
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  .calendar-flow-header-actions > button:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+
+  .calendar-flow-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px;
+  }
+
+  .calendar-flow-grid > * {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 430px) {
+  .calendar-flow-header-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .calendar-flow-header-actions > button:nth-child(3) {
+    grid-column: auto;
+  }
+
+  .calendar-flow-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px;
+  }
+
+  .calendar-card {
+    padding: 8px;
+  }
+
+  .calendar-thumb-wrap {
+    height: 118px !important;
+  }
+}
+
