@@ -1715,6 +1715,14 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                         >
                           {unpackingOrderId === row.id ? "Cancelando..." : "Cancelar embalagem"}
                         </button>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          disabled={Boolean(deletingOrderId)}
+                          onClick={() => void deleteSavedOrder(row)}
+                        >
+                          {deletingOrderId === row.id ? "Excluindo..." : "Excluir pedido"}
+                        </button>
                       </div>
                     </article>
                   );
@@ -1789,6 +1797,14 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                           onClick={() => void markOrderAsPacked(row)}
                         >
                           {packingOrderId === row.id ? "Salvando..." : "Marcar embalado"}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          disabled={Boolean(deletingOrderId)}
+                          onClick={() => void deleteSavedOrder(row)}
+                        >
+                          {deletingOrderId === row.id ? "Excluindo..." : "Excluir pedido"}
                         </button>
                       </div>
                     </article>
