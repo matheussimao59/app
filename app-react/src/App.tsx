@@ -22,7 +22,7 @@ export function App() {
       {() => (
         <Routes>
           <Route path="/" element={<AppLayout />}>
-            <Route index element={<Navigate to="/mercado-livre" replace />} />
+            <Route index element={<Navigate to="/mercado-livre/operacoes" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="precificacao" element={<PricingPage />} />
             <Route path="calendario" element={<CalendarPage />} />

@@ -1398,11 +1398,17 @@ body {
 }
 
 .ml-scan-icon {
-  font-family: "JetBrains Mono", Consolas, monospace;
-  font-size: 0.9rem;
-  font-weight: 800;
-  letter-spacing: -0.08em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
   line-height: 1;
+}
+
+.ml-scan-svg {
+  width: 22px;
+  height: 22px;
+  display: block;
 }
 
 .ml-scan-overlay {
@@ -4722,6 +4728,10 @@ body {
     color: #1d4ed8;
   }
 
+  .mobile-footer-bar.pedidos-only {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .mobile-menu-btn.mobile-footer-item {
     display: inline-flex;
     position: static;
@@ -4957,6 +4967,13 @@ body {
   transition: transform 150ms ease, box-shadow 150ms ease;
 }
 
+.ml-ops-hub-card-btn {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
 .ml-ops-hub-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 10px 18px rgba(15, 23, 42, 0.1);
@@ -4973,6 +4990,32 @@ body {
   font-size: 1rem;
 }
 
+.ml-ops-hub-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.ml-ops-hub-card.is-importacao .ml-ops-hub-icon {
+  background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+  color: #1d4ed8;
+}
+
+.ml-ops-hub-card.is-calendario .ml-ops-hub-icon {
+  background: linear-gradient(135deg, #dcfce7, #bbf7d0);
+  color: #15803d;
+}
+
+.ml-ops-hub-card.is-separacao .ml-ops-hub-icon {
+  background: linear-gradient(135deg, #ede9fe, #ddd6fe);
+  color: #6d28d9;
+}
+
+.ml-ops-hub-card.is-pedidos .ml-ops-hub-icon {
+  background: linear-gradient(135deg, #fee2e2, #fecaca);
+  color: #b91c1c;
+}
+
 .ml-ops-hub-card strong {
   font-size: 1rem;
 }
@@ -4984,6 +5027,22 @@ body {
   line-height: 1.35;
 }
 
+.ml-ops-card-date {
+  margin: 0;
+}
+
+.ml-ops-card-date span {
+  font-size: 0.72rem;
+  color: #475569;
+}
+
+.ml-ops-card-date input {
+  min-height: 36px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  padding: 7px 9px;
+}
+
 .ml-ops-hub-link {
   margin-top: auto;
   color: #1d4ed8;
@@ -4991,9 +5050,36 @@ body {
   font-size: 0.82rem;
 }
 
+.ml-import-modal {
+  width: min(520px, 96vw);
+}
+
+.ml-import-modal-actions {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.ml-ops-scan-fab {
+  position: fixed;
+  right: 14px;
+  bottom: 72px;
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  border: 0;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.32);
+  display: grid;
+  place-items: center;
+  z-index: 145;
+  cursor: pointer;
+}
+
 @media (max-width: 760px) {
   .ml-ops-hub-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
   }
 
@@ -5009,6 +5095,22 @@ body {
 
   .ml-ops-hub-card p {
     font-size: 0.76rem;
+  }
+
+  .ml-ops-card-date span {
+    font-size: 0.66rem;
+  }
+
+  .ml-ops-card-date input {
+    min-height: 34px;
+    padding: 6px 8px;
+  }
+
+  .ml-ops-scan-fab {
+    right: 12px;
+    bottom: 72px;
+    width: 52px;
+    height: 52px;
   }
 
   .ml-page .ml-orders-table-wrap > .table-wrap {

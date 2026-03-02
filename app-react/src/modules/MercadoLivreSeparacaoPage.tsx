@@ -939,6 +939,14 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
     return () => stopWebCamera();
   }, []);
 
+  useEffect(() => {
+    if (view !== "pedidos") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("scanner") !== "1") return;
+    openScannerFullscreen();
+  }, [view]);
+
+
   const stats = useMemo(() => {
     const uniqueTrackings = new Set(
       ordersBySelectedDate
@@ -1548,7 +1556,13 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
         title={fullScreenScanner && webCameraEnabled ? "Fechar scanner" : "Abrir scanner"}
       >
         <span className="ml-scan-icon" aria-hidden>
-          |||
+          <svg viewBox="0 0 24 24" className="ml-scan-svg" fill="none" stroke="currentColor" strokeWidth="1.9">
+            <path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8" />
+            <path d="M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8" />
+            <path d="M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16" />
+            <path d="M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" />
+            <path d="M8 9v6M11 8v8M14 9v6M17 8v8" />
+          </svg>
         </span>
       </button>
 

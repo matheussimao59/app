@@ -154,41 +154,7 @@ export function AppLayout() {
                 >
                   Mensagens
                 </NavLink>
-                <NavLink
-                  to="/mercado-livre/operacoes"
-                  onClick={closeMenu}
-                  className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
-                >
-                  Operacoes
-                </NavLink>
-                <NavLink
-                  to="/mercado-livre/importacao"
-                  onClick={closeMenu}
-                  className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
-                >
-                  Importacao
-                </NavLink>
-                <NavLink
-                  to="/mercado-livre/calendario-envio"
-                  onClick={closeMenu}
-                  className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
-                >
-                  Calendario Envio
-                </NavLink>
-                <NavLink
-                  to="/mercado-livre/separacao-producao"
-                  onClick={closeMenu}
-                  className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
-                >
-                  Producao
-                </NavLink>
-                <NavLink
-                  to="/mercado-livre/pedidos-envio"
-                  onClick={closeMenu}
-                  className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
-                >
-                  Pedidos Envio
-                </NavLink>
+                
               </div>
             )}
           </div>
