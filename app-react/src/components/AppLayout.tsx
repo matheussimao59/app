@@ -104,7 +104,7 @@ export function AppLayout() {
     { id: "precificacao", label: "Precificacao", path: "/precificacao" },
     { id: "calendario", label: "Calendario", path: "/calendario" },
     { id: "produtos", label: "Meus Produtos", path: "/produtos" },
-    { id: "pedidos", label: "Pedidos", path: "/mercado-livre/enviar-pedido" },
+    { id: "pedidos", label: "Pedidos", path: "/mercado-livre/operacoes" },
     { id: "teste_impressao", label: "Teste de Impressao", path: "/teste-impressao" },
     { id: "configuracoes", label: "Configuracoes", path: "/configuracoes" }
   ];
@@ -155,11 +155,39 @@ export function AppLayout() {
                   Mensagens
                 </NavLink>
                 <NavLink
-                  to="/mercado-livre/enviar-pedido"
+                  to="/mercado-livre/operacoes"
                   onClick={closeMenu}
                   className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
                 >
-                  Separacao de Pedido
+                  Operacoes
+                </NavLink>
+                <NavLink
+                  to="/mercado-livre/importacao"
+                  onClick={closeMenu}
+                  className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
+                >
+                  Importacao
+                </NavLink>
+                <NavLink
+                  to="/mercado-livre/calendario-envio"
+                  onClick={closeMenu}
+                  className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
+                >
+                  Calendario Envio
+                </NavLink>
+                <NavLink
+                  to="/mercado-livre/separacao-producao"
+                  onClick={closeMenu}
+                  className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
+                >
+                  Producao
+                </NavLink>
+                <NavLink
+                  to="/mercado-livre/pedidos-envio"
+                  onClick={closeMenu}
+                  className={({ isActive }) => (isActive ? "nav-subitem active" : "nav-subitem")}
+                >
+                  Pedidos Envio
                 </NavLink>
               </div>
             )}
@@ -207,9 +235,9 @@ export function AppLayout() {
             <span>Produtos</span>
           </NavLink>
           <NavLink
-            to="/mercado-livre/enviar-pedido"
+            to="/mercado-livre/operacoes"
             className={({ isActive }) =>
-              isActive || location.pathname.includes("/mercado-livre/enviar-pedido")
+              isActive || location.pathname.includes("/mercado-livre/operacoes") || location.pathname.includes("/mercado-livre/importacao") || location.pathname.includes("/mercado-livre/calendario-envio") || location.pathname.includes("/mercado-livre/separacao-producao") || location.pathname.includes("/mercado-livre/pedidos-envio")
                 ? "mobile-footer-item active"
                 : "mobile-footer-item"
             }

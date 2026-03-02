@@ -1,6 +1,8 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 
+type SeparacaoView = "all" | "importacao" | "calendario" | "producao" | "pedidos";
+
 type SheetJsModule = {
   read: (data: ArrayBuffer, options: { type: "array" }) => {
     SheetNames: string[];
@@ -23,6 +25,7 @@ type UploadRow = {
   productQty: number;
   recipientName: string;
   trackingNumber: string;
+  shippingDeadline: string;
   raw: Record<string, unknown>;
 };
 
@@ -84,9 +87,77 @@ function guessColumnIndex(headers: string[], aliases: string[]) {
   return -1;
 }
 
+function guessShippingDeadlineColumnIndex(headers: string[]) {
+  const normalizedHeaders = headers.map((h) => normalizeText(h));
+
+  // Prioriza cabeçalhos específicos e evita colisões com colunas genéricas de envio.
+  const directAliases = [
+    "prazo de envio",
+    "prazo para envio",
+    "prazo envio",
+    "data de envio",
+    "data para envio",
+    "data limite de envio",
+    "shipping deadline"
+  ];
+
+  for (const alias of directAliases) {
+    const idx = normalizedHeaders.findIndex((h) => h.includes(alias));
+    if (idx >= 0) return idx;
+  }
+
+  // Fallback: qualquer coluna que contenha "prazo"+"envio" ou "data"+"envio".
+  const byPattern = normalizedHeaders.findIndex(
+    (h) => (h.includes("prazo") && h.includes("envio")) || (h.includes("data") && h.includes("envio"))
+  );
+  if (byPattern >= 0) return byPattern;
+
+  return -1;
+}
+
 function toCell(row: unknown[], idx: number) {
   if (idx < 0) return "";
   return String(row[idx] ?? "").trim();
+}
+
+function toYmd(year: number, month: number, day: number) {
+  const mm = String(month).padStart(2, "0");
+  const dd = String(day).padStart(2, "0");
+  return `${year}-${mm}-${dd}`;
+}
+
+function normalizeDateToYmd(value: unknown): string {
+  if (value == null) return "";
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value > 20000 && value < 90000) {
+      const excelEpoch = Date.UTC(1899, 11, 30);
+      const utcMs = excelEpoch + Math.round(value) * 24 * 60 * 60 * 1000;
+      const d = new Date(utcMs);
+      return toYmd(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+    }
+    return "";
+  }
+
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  const ymd = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (ymd) return toYmd(Number(ymd[1]), Number(ymd[2]), Number(ymd[3]));
+
+  const dmy = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (dmy) {
+    const day = Number(dmy[1]);
+    const month = Number(dmy[2]);
+    const year = Number(dmy[3]);
+    if (year > 1900 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return toYmd(year, month, day);
+    }
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return toYmd(parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate());
 }
 
 function buildImportKey(row: UploadRow) {
@@ -128,6 +199,7 @@ function parseRowsFromGrid(grid: unknown[][]): UploadRow[] {
   const idxQty = guessColumnIndex(headerRow, ["qtd. do produto", "qtd do produto", "quantidade", "qty"]);
   const idxRecipient = guessColumnIndex(headerRow, ["nome do destinatario", "destinatario", "destinatário"]);
   const idxTracking = guessColumnIndex(headerRow, ["n de rastreio", "numero de rastreio", "rastreio", "tracking"]);
+  const idxShippingDeadline = guessShippingDeadlineColumnIndex(headerRow);
 
   if (idxOrderNumber < 0 || idxAdName < 0 || idxQty < 0) {
     throw new Error(
@@ -142,6 +214,7 @@ function parseRowsFromGrid(grid: unknown[][]): UploadRow[] {
     const platformOrderNumber = toCell(row, idxOrderNumber);
     const adName = toCell(row, idxAdName);
     const trackingNumber = toCell(row, idxTracking);
+    const shippingDeadline = normalizeDateToYmd(row[idxShippingDeadline]);
 
     if (!platformOrderNumber && !adName && !trackingNumber) continue;
 
@@ -157,6 +230,7 @@ function parseRowsFromGrid(grid: unknown[][]): UploadRow[] {
       productQty: Math.max(1, Math.floor(valueAsNumber(row[idxQty]) || 1)),
       recipientName: toCell(row, idxRecipient),
       trackingNumber,
+      shippingDeadline,
       raw: {
         order: platformOrderNumber,
         ad_name: adName,
@@ -167,7 +241,8 @@ function parseRowsFromGrid(grid: unknown[][]): UploadRow[] {
         observations: toCell(row, idxObs),
         product_qty: Math.max(1, Math.floor(valueAsNumber(row[idxQty]) || 1)),
         recipient_name: toCell(row, idxRecipient),
-        tracking: trackingNumber
+        tracking: trackingNumber,
+        shipping_deadline: shippingDeadline || null
       }
     });
   }
@@ -218,11 +293,42 @@ function formatDate(value?: string) {
   return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-export function MercadoLivreSeparacaoPage() {
+function formatDateOnly(value?: string) {
+  const ymd = normalizeDateToYmd(value || "");
+  if (!ymd) return "-";
+  const d = new Date(`${ymd}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("pt-BR");
+}
+
+function shippingDateFromRaw(raw: Record<string, unknown> | null | undefined) {
+  if (!raw || typeof raw !== "object") return "";
+  const candidates = [
+    raw.shipping_deadline,
+    raw.prazo_de_envio,
+    raw.prazo_envio,
+    raw.data_de_envio,
+    raw.data_envio
+  ];
+  for (const value of candidates) {
+    const ymd = normalizeDateToYmd(value);
+    if (ymd) return ymd;
+  }
+  return "";
+}
+
+export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
+  const view = props?.view || "all";
+  const todayYmd = toYmd(
+    new Date().getFullYear(),
+    new Date().getMonth() + 1,
+    new Date().getDate()
+  );
   const [userId, setUserId] = useState<string | null>(null);
   const [loadingInit, setLoadingInit] = useState(true);
   const [loadingFile, setLoadingFile] = useState(false);
   const [savingRows, setSavingRows] = useState(false);
+  const [updatingShippingDates, setUpdatingShippingDates] = useState(false);
   const [removingRows, setRemovingRows] = useState(false);
   const [fileName, setFileName] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -230,6 +336,8 @@ export function MercadoLivreSeparacaoPage() {
   const [previewRows, setPreviewRows] = useState<UploadRow[]>([]);
   const [savedOrders, setSavedOrders] = useState<ShippingOrder[]>([]);
   const [trackingSearch, setTrackingSearch] = useState("");
+  const [shippingDateFilter, setShippingDateFilter] = useState(todayYmd);
+  const [listShippingDate, setListShippingDate] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<ShippingOrder | null>(null);
   const [showPackedOrdersModal, setShowPackedOrdersModal] = useState(false);
   const [showUnpackedOrdersModal, setShowUnpackedOrdersModal] = useState(false);
@@ -317,6 +425,8 @@ export function MercadoLivreSeparacaoPage() {
 
       setPreviewRows(parsed);
       setFileName(file.name);
+      const fileDate = parsed.find((row) => row.shippingDeadline)?.shippingDeadline || "";
+      if (fileDate) setListShippingDate(fileDate);
       setStatus(`${parsed.length} pedidos lidos na planilha. Clique em salvar para gravar no sistema.`);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Falha ao importar arquivo.";
@@ -340,31 +450,68 @@ export function MercadoLivreSeparacaoPage() {
     setStatus(null);
 
     try {
-      const payload = previewRows.map((row) => ({
-        user_id: userId,
-        platform_order_number: row.platformOrderNumber || null,
-        ad_name: row.adName || "Produto sem titulo",
-        variation: row.variation || null,
-        image_url: row.imageUrl || null,
-        buyer_notes: row.buyerNotes || null,
-        observations: row.observations || null,
-        product_qty: Math.max(1, Number(row.productQty) || 1),
-        recipient_name: row.recipientName || null,
-        tracking_number: row.trackingNumber || null,
-        source_file_name: fileName || null,
-        import_key: buildImportKey(row),
-        row_raw: row.raw,
-        updated_at: new Date().toISOString()
-      }));
+      const fallbackListDate = normalizeDateToYmd(listShippingDate);
+      const preparedRows = previewRows.map((row) => {
+        const importKey = buildImportKey(row);
+        const shippingDeadline = normalizeDateToYmd(row.shippingDeadline) || fallbackListDate;
+        const nextRaw = { ...(row.raw || {}) };
+        if (shippingDeadline) nextRaw.shipping_deadline = shippingDeadline;
 
-      const { error: saveError } = await supabase
-        .from("ml_shipping_orders")
-        .upsert(payload, { onConflict: "user_id,import_key" });
+        return {
+          importKey,
+          shippingDeadline,
+          db: {
+            user_id: userId,
+            platform_order_number: row.platformOrderNumber || null,
+            ad_name: row.adName || "Produto sem titulo",
+            variation: row.variation || null,
+            image_url: row.imageUrl || null,
+            buyer_notes: row.buyerNotes || null,
+            observations: row.observations || null,
+            product_qty: Math.max(1, Number(row.productQty) || 1),
+            recipient_name: row.recipientName || null,
+            tracking_number: row.trackingNumber || null,
+            source_file_name: fileName || null,
+            import_key: importKey,
+            row_raw: nextRaw,
+            updated_at: new Date().toISOString()
+          }
+        };
+      });
+      const payload = preparedRows.map((row) => row.db);
 
-      if (saveError) throw new Error(saveError.message);
+      const keys = payload.map((row) => row.import_key);
+      const existingKeys = new Set<string>();
+      const chunkSize = 400;
+
+      for (let i = 0; i < keys.length; i += chunkSize) {
+        const chunk = keys.slice(i, i + chunkSize);
+        const { data: existingRows, error: existingError } = await supabase
+          .from("ml_shipping_orders")
+          .select("import_key")
+          .eq("user_id", userId)
+          .in("import_key", chunk);
+
+        if (existingError) throw new Error(existingError.message);
+        for (const row of existingRows || []) {
+          const key = typeof row.import_key === "string" ? row.import_key : "";
+          if (key) existingKeys.add(key);
+        }
+      }
+
+      const onlyNewRows = payload.filter((row) => !existingKeys.has(row.import_key));
+
+      if (onlyNewRows.length > 0) {
+        const { error: saveError } = await supabase.from("ml_shipping_orders").insert(onlyNewRows);
+        if (saveError) throw new Error(saveError.message);
+      }
 
       await loadSavedOrders(userId);
-      setStatus(`${payload.length} pedidos salvos/atualizados com sucesso.`);
+      const ignoredCount = payload.length - onlyNewRows.length;
+      setStatus(
+        `${onlyNewRows.length} etiqueta(s) nova(s) importada(s). ` +
+          `${Math.max(0, ignoredCount)} etiqueta(s) ja existia(m) e foi(ram) ignorada(s).`
+      );
     } catch (e) {
       const message = e instanceof Error ? e.message : "Falha ao salvar pedidos.";
       setError(`Nao foi possivel salvar: ${message}`);
@@ -373,9 +520,86 @@ export function MercadoLivreSeparacaoPage() {
     }
   }
 
+  async function applyShippingDatesToExistingWithoutDate() {
+    if (!supabase || !userId) return;
+    if (!previewRows.length) {
+      setError("Importe um arquivo antes de atualizar prazo de envio.");
+      return;
+    }
+
+    setUpdatingShippingDates(true);
+    setError(null);
+    setStatus(null);
+
+    try {
+      const fallbackListDate = normalizeDateToYmd(listShippingDate);
+      const byImportKey = new Map<string, string>();
+
+      for (const row of previewRows) {
+        const importKey = buildImportKey(row);
+        const deadline = normalizeDateToYmd(row.shippingDeadline) || fallbackListDate;
+        if (deadline) byImportKey.set(importKey, deadline);
+      }
+
+      const keys = [...byImportKey.keys()];
+      if (!keys.length) {
+        setStatus("Nenhuma data de envio valida encontrada na planilha.");
+        return;
+      }
+
+      const chunkSize = 400;
+      const toUpdate: Array<{ id: string; row_raw: Record<string, unknown> | null; shipping_deadline: string }> = [];
+
+      for (let i = 0; i < keys.length; i += chunkSize) {
+        const chunk = keys.slice(i, i + chunkSize);
+        const { data: rows, error: loadError } = await supabase
+          .from("ml_shipping_orders")
+          .select("id, import_key, row_raw")
+          .eq("user_id", userId)
+          .in("import_key", chunk);
+
+        if (loadError) throw new Error(loadError.message);
+
+        for (const row of rows || []) {
+          const importKey = typeof row.import_key === "string" ? row.import_key : "";
+          const shippingDeadline = byImportKey.get(importKey) || "";
+          const current = shippingDateFromRaw((row.row_raw as Record<string, unknown> | null) || null);
+          const id = typeof row.id === "string" ? row.id : "";
+          if (!id || !shippingDeadline || current) continue;
+          toUpdate.push({
+            id,
+            row_raw: (row.row_raw as Record<string, unknown> | null) || null,
+            shipping_deadline: shippingDeadline
+          });
+        }
+      }
+
+      let updated = 0;
+      for (const row of toUpdate) {
+        const nextRaw = { ...(row.row_raw || {}), shipping_deadline: row.shipping_deadline };
+        const { error: updateError } = await supabase
+          .from("ml_shipping_orders")
+          .update({ row_raw: nextRaw, updated_at: new Date().toISOString() })
+          .eq("user_id", userId)
+          .eq("id", row.id);
+        if (updateError) throw new Error(updateError.message);
+        updated += 1;
+      }
+
+      await loadSavedOrders(userId);
+      setStatus(`${updated} pedido(s) existente(s) recebeu(ram) prazo de envio (somente onde estava sem data).`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Falha ao atualizar prazos de envio.";
+      setError(`Nao foi possivel atualizar prazos: ${message}`);
+    } finally {
+      setUpdatingShippingDates(false);
+    }
+  }
+
   function clearImportedList() {
     setPreviewRows([]);
     setFileName("");
+    setListShippingDate("");
     setStatus("Lista importada descartada.");
     setError(null);
   }
@@ -566,11 +790,20 @@ export function MercadoLivreSeparacaoPage() {
     }
   }
 
+  const ordersBySelectedDate = useMemo(
+    () => savedOrders.filter((row) => shippingDateFromRaw(row.row_raw) === shippingDateFilter),
+    [savedOrders, shippingDateFilter]
+  );
+
   const filteredByTracking = useMemo(() => {
     const key = normalizeTracking(trackingSearch);
-    if (!key) return savedOrders.slice(0, 30);
-    return savedOrders.filter((row) => normalizeTracking(row.tracking_number || "").includes(key));
-  }, [savedOrders, trackingSearch]);
+    const byTracking = key
+      ? ordersBySelectedDate.filter((row) => normalizeTracking(row.tracking_number || "").includes(key))
+      : ordersBySelectedDate;
+
+    const sorted = [...byTracking].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    return key ? sorted.slice(0, 300) : sorted.slice(0, 200);
+  }, [ordersBySelectedDate, trackingSearch]);
 
   function openByTrackingValue(rawValue: string, options?: { closeCameraOnFound?: boolean }) {
     const normalized = normalizeTracking(rawValue);
@@ -708,49 +941,88 @@ export function MercadoLivreSeparacaoPage() {
 
   const stats = useMemo(() => {
     const uniqueTrackings = new Set(
-      savedOrders
+      ordersBySelectedDate
         .map((row) => normalizeTracking(row.tracking_number || ""))
         .filter(Boolean)
     );
 
-    const totalQty = savedOrders.reduce((acc, row) => acc + (Number(row.product_qty) || 0), 0);
-    const packedOrders = savedOrders.reduce((acc, row) => acc + (isOrderPacked(row) ? 1 : 0), 0);
+    const totalQty = ordersBySelectedDate.reduce((acc, row) => acc + (Number(row.product_qty) || 0), 0);
+    const packedOrders = ordersBySelectedDate.reduce((acc, row) => acc + (isOrderPacked(row) ? 1 : 0), 0);
 
     return {
-      totalOrders: savedOrders.length,
+      totalOrders: ordersBySelectedDate.length,
       totalTrackings: uniqueTrackings.size,
       totalQty,
       packedOrders,
-      unpackedOrders: Math.max(0, savedOrders.length - packedOrders)
+      unpackedOrders: Math.max(0, ordersBySelectedDate.length - packedOrders)
     };
-  }, [savedOrders]);
+  }, [ordersBySelectedDate]);
 
   const packedOrders = useMemo(
     () =>
-      savedOrders
+      ordersBySelectedDate
         .filter((row) => isOrderPacked(row))
         .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
-    [savedOrders]
+    [ordersBySelectedDate]
   );
 
   const unpackedOrders = useMemo(
     () =>
-      savedOrders
+      ordersBySelectedDate
         .filter((row) => !isOrderPacked(row))
         .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
-    [savedOrders]
+    [ordersBySelectedDate]
   );
+
+  const previewRowsBySelectedDate = useMemo(() => {
+    if (!previewRows.length) return [];
+    return previewRows.filter((row) => {
+      const deadline = normalizeDateToYmd(row.shippingDeadline) || normalizeDateToYmd(listShippingDate);
+      return deadline === shippingDateFilter;
+    });
+  }, [previewRows, listShippingDate, shippingDateFilter]);
+
+  const shippingCalendarRows = useMemo(() => {
+    const grouped = new Map<
+      string,
+      { shippingDate: string; orders: number; qty: number; packed: number; unpacked: number }
+    >();
+
+    for (const row of savedOrders) {
+      const shippingDate = shippingDateFromRaw(row.row_raw) || "sem-data";
+      const current = grouped.get(shippingDate) || {
+        shippingDate,
+        orders: 0,
+        qty: 0,
+        packed: 0,
+        unpacked: 0
+      };
+      current.orders += 1;
+      current.qty += Math.max(1, Number(row.product_qty) || 1);
+      if (isOrderPacked(row)) current.packed += 1;
+      else current.unpacked += 1;
+      grouped.set(shippingDate, current);
+    }
+
+    return [...grouped.values()].sort((a, b) => {
+      if (a.shippingDate === "sem-data" && b.shippingDate !== "sem-data") return 1;
+      if (a.shippingDate !== "sem-data" && b.shippingDate === "sem-data") return -1;
+      if (a.shippingDate < b.shippingDate) return -1;
+      if (a.shippingDate > b.shippingDate) return 1;
+      return 0;
+    });
+  }, [savedOrders]);
 
   const productionRows = useMemo(() => {
     const source =
       previewRows.length > 0
-        ? previewRows.map((row) => ({
+        ? previewRowsBySelectedDate.map((row) => ({
             adName: row.adName,
             sku: row.sku,
             imageUrl: row.imageUrl,
             productQty: Math.max(1, Number(row.productQty) || 1)
           }))
-        : savedOrders.map((row) => ({
+        : ordersBySelectedDate.map((row) => ({
             adName: row.ad_name || "",
             sku: safeRawValue(row.row_raw, "sku"),
             imageUrl: row.image_url || safeRawValue(row.row_raw, "image_url"),
@@ -796,20 +1068,45 @@ export function MercadoLivreSeparacaoPage() {
     }
 
     return [...grouped.values()].sort((a, b) => b.totalProduce - a.totalProduce);
-  }, [previewRows, savedOrders]);
+  }, [previewRows, previewRowsBySelectedDate, ordersBySelectedDate]);
+
+  const showKpis = view === "all" || view === "calendario" || view === "producao" || view === "pedidos";
+  const showImportMenu = view === "all" || view === "importacao" || view === "pedidos";
+  const showShippingCalendar = view === "all" || view === "calendario" || view === "pedidos";
+  const showProduction = view === "all" || view === "producao";
+  const showTrackingList = view === "all" || view === "pedidos";
+  const showPreviewTable = view === "all" || view === "importacao";
+  const pageTitle =
+    view === "importacao"
+      ? "Importacao de Pedidos"
+      : view === "calendario"
+        ? "Calendario de Envio"
+        : view === "producao"
+          ? "Separacao de Producao"
+          : view === "pedidos"
+            ? "Pedidos de Envio"
+            : "Separacao de Pedido";
+  const pageDesc =
+    view === "importacao"
+      ? "Suba planilhas, mantenha somente pedidos novos e aplique prazo em pedidos sem data."
+      : view === "calendario"
+        ? "Controle operacional por data de envio para visualizar volume e status do dia."
+        : view === "producao"
+          ? "Agrupamento de producao por anuncio, SKU e total a produzir."
+          : view === "pedidos"
+            ? "Conferencia por rastreio, scanner e status de embalagem."
+            : "Importe pedidos em .xlsx, organize por rastreio e consulte dados rapidamente para envio e conferencia.";
 
   return (
     <section className="page ml-separacao-page">
       <div className="section-head row-between">
         <div>
-          <h2>Separacao de Pedido</h2>
-          <p className="page-text">
-            Importe pedidos em .xlsx, organize por rastreio e consulte dados rapidamente para envio e conferencia.
-          </p>
+          <h2>{pageTitle}</h2>
+          <p className="page-text">{pageDesc}</p>
         </div>
       </div>
 
-      <div className="ml-kpi-grid ml-production-kpis ml-separacao-kpis">
+      {showKpis && <div className="ml-kpi-grid ml-production-kpis ml-separacao-kpis">
         <article className="kpi-card">
           <p>Pedidos salvos</p>
           <strong>{stats.totalOrders}</strong>
@@ -850,9 +1147,9 @@ export function MercadoLivreSeparacaoPage() {
           <strong>{stats.unpackedOrders}</strong>
           <span>Total de pedidos pendentes de embalagem</span>
         </button>
-      </div>
+      </div>}
 
-      <div className="soft-panel ml-upload-panel ml-separacao-menu">
+      {showImportMenu && <div className="soft-panel ml-upload-panel ml-separacao-menu">
         <p>Menu Separacao de Pedido</p>
         <div className="ml-upload-row">
           <label className="primary-btn" style={{ cursor: "pointer" }}>
@@ -869,15 +1166,23 @@ export function MercadoLivreSeparacaoPage() {
             type="button"
             className="ghost-btn"
             onClick={() => void saveImportedRows()}
-            disabled={!previewRows.length || savingRows || removingRows || loadingInit}
+            disabled={!previewRows.length || savingRows || removingRows || loadingInit || updatingShippingDates}
           >
             {savingRows ? "Salvando..." : "Salvar pedidos no sistema"}
           </button>
           <button
             type="button"
             className="ghost-btn"
+            onClick={() => void applyShippingDatesToExistingWithoutDate()}
+            disabled={!previewRows.length || savingRows || removingRows || loadingInit || updatingShippingDates}
+          >
+            {updatingShippingDates ? "Atualizando prazo..." : "Aplicar prazo em pedidos sem data"}
+          </button>
+          <button
+            type="button"
+            className="ghost-btn"
             onClick={() => void removeImportedRows()}
-            disabled={!previewRows.length || savingRows || removingRows || loadingInit}
+            disabled={!previewRows.length || savingRows || removingRows || loadingInit || updatingShippingDates}
           >
             {removingRows ? "Removendo..." : "Remover lista do sistema"}
           </button>
@@ -885,13 +1190,21 @@ export function MercadoLivreSeparacaoPage() {
             type="button"
             className="ghost-btn"
             onClick={clearImportedList}
-            disabled={!previewRows.length || savingRows || removingRows || loadingInit}
+            disabled={!previewRows.length || savingRows || removingRows || loadingInit || updatingShippingDates}
           >
             Descartar lista
           </button>
           {fileName && <span className="page-text">Arquivo: {fileName}</span>}
         </div>
         <div className="ml-upload-row">
+          <label className="field ml-separacao-date-field" style={{ marginBottom: 0 }}>
+            <span>Data de envio da lista</span>
+            <input
+              type="date"
+              value={listShippingDate}
+              onChange={(e) => setListShippingDate(normalizeDateToYmd(e.target.value))}
+            />
+          </label>
           <button
             type="button"
             className={scannerMode ? "primary-btn" : "ghost-btn"}
@@ -921,6 +1234,14 @@ export function MercadoLivreSeparacaoPage() {
                   setTrackingSearch("");
                 }
               }}
+            />
+          </label>
+          <label className="field ml-separacao-date-field" style={{ marginBottom: 0 }}>
+            <span>Calendario por dia</span>
+            <input
+              type="date"
+              value={shippingDateFilter}
+              onChange={(e) => setShippingDateFilter(normalizeDateToYmd(e.target.value) || todayYmd)}
             />
           </label>
           <button
@@ -958,6 +1279,7 @@ export function MercadoLivreSeparacaoPage() {
               className="ghost-btn"
               onClick={() => {
                 setTrackingSearch("");
+                setShippingDateFilter(todayYmd);
                 setScanStatus(null);
                 trackingInputRef.current?.focus();
               }}
@@ -980,13 +1302,68 @@ export function MercadoLivreSeparacaoPage() {
         {scanStatus && <p className="page-text">{scanStatus}</p>}
         <span className="page-text">
           Campos importados: N de Pedido da Plataforma, Nome do Anuncio, SKU, Variacao, Link da Imagem, Notas do Comprador,
-          Observacoes, Qtd. do Produto, Nome do Destinatario e N de Rastreio (quando existir).
+          Observacoes, Qtd. do Produto, Nome do Destinatario, N de Rastreio e Prazo de Envio (quando existir).
         </span>
         {status && <p className="page-text">{status}</p>}
         {error && <p className="error-text">{error}</p>}
-      </div>
+      </div>}
 
-      <div className="ml-orders-table-wrap">
+      {showShippingCalendar && <div className="ml-orders-table-wrap">
+        <div className="ml-orders-head">
+          <h3>Calendario de envio</h3>
+          <span>{shippingCalendarRows.length} dia(s)</span>
+        </div>
+        <div className="table-wrap">
+          <table className="table clean ml-shipping-table">
+            <thead>
+              <tr>
+                <th>Data de envio</th>
+                <th>Pedidos</th>
+                <th>Qtd itens</th>
+                <th>Embalados</th>
+                <th>Pendentes</th>
+                <th>Filtrar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shippingCalendarRows.length === 0 ? (
+                <tr>
+                  <td colSpan={6}>Sem dados de envio para exibir.</td>
+                </tr>
+              ) : (
+                shippingCalendarRows.map((day) => (
+                  <tr key={day.shippingDate}>
+                    <td data-label="Data de envio">
+                      {day.shippingDate === "sem-data" ? "Sem data" : formatDateOnly(day.shippingDate)}
+                    </td>
+                    <td data-label="Pedidos">{day.orders}</td>
+                    <td data-label="Qtd itens">{day.qty}</td>
+                    <td data-label="Embalados">{day.packed}</td>
+                    <td data-label="Pendentes">{day.unpacked}</td>
+                    <td data-label="Filtrar">
+                      {day.shippingDate !== "sem-data" ? (
+                        <button
+                          type="button"
+                          className={shippingDateFilter === day.shippingDate ? "primary-btn" : "ghost-btn"}
+                          onClick={() =>
+                            setShippingDateFilter((prev) => (prev === day.shippingDate ? todayYmd : day.shippingDate))
+                          }
+                        >
+                          {shippingDateFilter === day.shippingDate ? "Hoje" : "Filtrar dia"}
+                        </button>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>}
+
+      {showProduction && <div className="ml-orders-table-wrap">
         <div className="ml-orders-head">
           <h3>Separacao de producao</h3>
           <span>{productionRows.length} grupo(s)</span>
@@ -1049,9 +1426,9 @@ export function MercadoLivreSeparacaoPage() {
           Regra de quantidade por pedido: quando o titulo comeca com numero (ex.: 35 Lembrancinhas...), esse numero vira
           as unidades por anuncio para calcular o total de producao.
         </p>
-      </div>
+      </div>}
 
-      <div className="ml-orders-table-wrap">
+      {showTrackingList && <div className="ml-orders-table-wrap">
         <div className="ml-orders-head">
           <h3>Buscar por N de Rastreio</h3>
           <span>{filteredByTracking.length} resultado(s)</span>
@@ -1066,6 +1443,7 @@ export function MercadoLivreSeparacaoPage() {
                 <th>Destinatario</th>
                 <th>Anuncio</th>
                 <th>Qtd</th>
+                <th>Data envio</th>
                 <th>Atualizado</th>
                 <th>Detalhes</th>
                 <th>Excluir</th>
@@ -1074,11 +1452,11 @@ export function MercadoLivreSeparacaoPage() {
             <tbody>
               {loadingInit ? (
                 <tr>
-                  <td colSpan={8}>Carregando pedidos...</td>
+                  <td colSpan={9}>Carregando pedidos...</td>
                 </tr>
               ) : filteredByTracking.length === 0 ? (
                 <tr>
-                  <td colSpan={8}>Nenhum pedido encontrado.</td>
+                  <td colSpan={9}>Nenhum pedido encontrado.</td>
                 </tr>
               ) : (
                 filteredByTracking.slice(0, 200).map((row) => (
@@ -1088,6 +1466,7 @@ export function MercadoLivreSeparacaoPage() {
                     <td data-label="Destinatario">{row.recipient_name || "-"}</td>
                     <td className="ml-col-title" data-label="Anuncio">{row.ad_name || "-"}</td>
                     <td data-label="Qtd">{row.product_qty || 1}</td>
+                    <td data-label="Data envio">{formatDateOnly(shippingDateFromRaw(row.row_raw))}</td>
                     <td data-label="Atualizado">{formatDate(row.updated_at)}</td>
                     <td data-label="Detalhes">
                       <button type="button" className="ghost-btn" onClick={() => setSelectedOrder(row)}>
@@ -1110,12 +1489,12 @@ export function MercadoLivreSeparacaoPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </div>}
 
-      <div className="ml-orders-table-wrap">
+      {showPreviewTable && <div className="ml-orders-table-wrap">
         <div className="ml-orders-head">
           <h3>Pre-visualizacao do arquivo importado</h3>
-          <span>{previewRows.length} linha(s)</span>
+          <span>{previewRowsBySelectedDate.length} linha(s)</span>
         </div>
         <div className="table-wrap">
           <table className="table clean ml-shipping-table">
@@ -1128,15 +1507,16 @@ export function MercadoLivreSeparacaoPage() {
                 <th>Qtd</th>
                 <th>Destinatario</th>
                 <th>Rastreio</th>
+                <th>Prazo envio</th>
               </tr>
             </thead>
             <tbody>
-              {previewRows.length === 0 ? (
+              {previewRowsBySelectedDate.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>Sem linhas carregadas.</td>
+                  <td colSpan={8}>Sem linhas para a data selecionada.</td>
                 </tr>
               ) : (
-                previewRows.map((row) => (
+                previewRowsBySelectedDate.map((row) => (
                   <tr key={row.rowId}>
                     <td className="ml-col-order-id" data-label="Pedido">{row.platformOrderNumber || "-"}</td>
                     <td className="ml-col-title" data-label="Anuncio">{row.adName || "-"}</td>
@@ -1145,13 +1525,14 @@ export function MercadoLivreSeparacaoPage() {
                     <td data-label="Qtd">{row.productQty}</td>
                     <td data-label="Destinatario">{row.recipientName || "-"}</td>
                     <td className="ml-col-order-id" data-label="Rastreio">{row.trackingNumber || "-"}</td>
+                    <td data-label="Prazo envio">{formatDateOnly(row.shippingDeadline || listShippingDate)}</td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
-      </div>
+      </div>}
 
       <button
         type="button"
@@ -1222,6 +1603,7 @@ export function MercadoLivreSeparacaoPage() {
                 <p><strong>Anuncio:</strong> {selectedOrder.ad_name || "-"}</p>
                 <p><strong>Variacao:</strong> {selectedOrder.variation || "-"}</p>
                 <p><strong>Quantidade:</strong> {selectedOrder.product_qty || 1}</p>
+                <p><strong>Data de envio:</strong> {formatDateOnly(shippingDateFromRaw(selectedOrder.row_raw))}</p>
                 <p><strong>Status:</strong> {isOrderPacked(selectedOrder) ? "Embalado" : "Pendente"}</p>
                 <p><strong>Notas do comprador:</strong> {selectedOrder.buyer_notes || "-"}</p>
                 <p><strong>Observacoes:</strong> {selectedOrder.observations || "-"}</p>
@@ -1296,6 +1678,7 @@ export function MercadoLivreSeparacaoPage() {
                           <p><strong>Destinatario:</strong> {row.recipient_name || "-"}</p>
                           <p><strong>Anuncio:</strong> {row.ad_name || "-"}</p>
                           <p><strong>Variacao:</strong> {row.variation || "-"}</p>
+                          <p><strong>Data envio:</strong> {formatDateOnly(shippingDateFromRaw(row.row_raw))}</p>
                         </div>
                       </div>
                       <div className="ml-packed-order-grid">
@@ -1370,6 +1753,7 @@ export function MercadoLivreSeparacaoPage() {
                           <p><strong>Destinatario:</strong> {row.recipient_name || "-"}</p>
                           <p><strong>Anuncio:</strong> {row.ad_name || "-"}</p>
                           <p><strong>Variacao:</strong> {row.variation || "-"}</p>
+                          <p><strong>Data envio:</strong> {formatDateOnly(shippingDateFromRaw(row.row_raw))}</p>
                         </div>
                       </div>
                       <div className="ml-packed-order-grid">
