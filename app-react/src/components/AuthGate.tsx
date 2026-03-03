@@ -7,14 +7,24 @@ interface AuthGateProps {
 }
 
 export function AuthGate({ children }: AuthGateProps) {
+  const SAVED_EMAIL_KEY = "auth_saved_email";
+  const REMEMBER_LOGIN_KEY = "auth_remember_login";
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberLogin, setRememberLogin] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSignUp, setIsSignUp] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const remembered = localStorage.getItem(REMEMBER_LOGIN_KEY);
+    const savedEmail = localStorage.getItem(SAVED_EMAIL_KEY);
+    if (remembered === "0") setRememberLogin(false);
+    if (savedEmail) setEmail(savedEmail);
+  }, []);
 
   useEffect(() => {
     if (!supabase) {
@@ -76,7 +86,18 @@ export function AuthGate({ children }: AuthGateProps) {
     }
 
     const { error: loginError } = await supabase.auth.signInWithPassword({ email, password });
-    if (loginError) setError(loginError.message);
+    if (loginError) {
+      setError(loginError.message);
+      return;
+    }
+
+    if (rememberLogin) {
+      localStorage.setItem(SAVED_EMAIL_KEY, email.trim());
+      localStorage.setItem(REMEMBER_LOGIN_KEY, "1");
+    } else {
+      localStorage.removeItem(SAVED_EMAIL_KEY);
+      localStorage.setItem(REMEMBER_LOGIN_KEY, "0");
+    }
   }
 
   async function handleLogout() {
@@ -150,6 +171,16 @@ export function AuthGate({ children }: AuthGateProps) {
               required
             />
           </label>
+          {!isSignUp && (
+            <label className="auth-remember">
+              <input
+                type="checkbox"
+                checked={rememberLogin}
+                onChange={(e) => setRememberLogin(e.target.checked)}
+              />
+              <span>Salvar login</span>
+            </label>
+          )}
           {error && <p className="error">{error}</p>}
           <button type="submit">{isSignUp ? "Criar conta" : "Entrar"}</button>
         </form>

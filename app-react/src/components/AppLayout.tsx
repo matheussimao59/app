@@ -21,6 +21,15 @@ function NavIcon({ id }: { id: string }) {
     );
   }
 
+  if (id === "inicio") {
+    return (
+      <svg {...props}>
+        <path d="M4 10.5L12 4l8 6.5" />
+        <path d="M6.5 9.7V20h11V9.7" />
+      </svg>
+    );
+  }
+
   if (id === "calendario") {
     return (
       <svg {...props}>
@@ -103,6 +112,7 @@ export function AppLayout() {
   const mlActive = location.pathname.startsWith("/mercado-livre");
 
   const navItems: BaseNavItem[] = [
+    { id: "inicio", label: "Inicio", path: "/inicio" },
     ...(isLocalNfEnabled ? [{ id: "nota_fiscal", label: "Nota Fiscal", path: "/nota-fiscal" }] : []),
     { id: "precificacao", label: "Precificacao", path: "/precificacao" },
     { id: "calendario", label: "Calendario", path: "/calendario" },
@@ -261,6 +271,13 @@ export function AppLayout() {
             </span>
             <span>{menuOpen ? "Fechar" : "Menu"}</span>
           </button>
+          <NavLink
+            to="/inicio"
+            className={({ isActive }) => (isActive ? "mobile-footer-item active" : "mobile-footer-item")}
+          >
+            <span className="mobile-footer-icon"><NavIcon id="inicio" /></span>
+            <span>Inicio</span>
+          </NavLink>
           <NavLink
             to="/produtos"
             className={({ isActive }) => (isActive ? "mobile-footer-item active" : "mobile-footer-item")}

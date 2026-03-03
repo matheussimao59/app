@@ -13,6 +13,7 @@ import { MercadoLivreOperacoesPage } from "./modules/MercadoLivreOperacoesPage";
 import { TesteImpressaoPage } from "./modules/TesteImpressaoPage";
 import { NotaFiscalPage } from "./modules/NotaFiscalPage";
 import { PedidosPage } from "./modules/PedidosPage";
+import { InicioPage } from "./modules/InicioPage";
 
 const isLocalNfEnabled = Boolean((import.meta as any)?.env?.DEV);
 
@@ -22,7 +23,8 @@ export function App() {
       {() => (
         <Routes>
           <Route path="/" element={<AppLayout />}>
-            <Route index element={<Navigate to="/mercado-livre/operacoes" replace />} />
+            <Route index element={<Navigate to="/inicio" replace />} />
+            <Route path="inicio" element={<InicioPage />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="precificacao" element={<PricingPage />} />
             <Route path="calendario" element={<CalendarPage />} />
