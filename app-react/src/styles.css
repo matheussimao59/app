@@ -78,6 +78,82 @@ body {
     #f8fafc;
 }
 
+.splash-bg {
+  background:
+    radial-gradient(circle at 10% 10%, #bfdbfe 0, transparent 30%),
+    radial-gradient(circle at 88% 18%, #fde68a 0, transparent 28%),
+    radial-gradient(circle at 50% 100%, #fbcfe8 0, transparent 35%),
+    #f8fafc;
+}
+
+.splash-card {
+  width: min(420px, 100%);
+  border: 1px solid #dbe3ef;
+  border-radius: 24px;
+  background: #ffffff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
+  padding: 28px;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  animation: splashPop 0.55s ease;
+}
+
+.splash-logo-mark {
+  width: 62px;
+  height: 62px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  color: #0f172a;
+  font-size: 1.95rem;
+  font-weight: 900;
+  background: linear-gradient(135deg, #60a5fa, #f472b6, #facc15);
+}
+
+.splash-logo-image {
+  width: 110px;
+  height: 110px;
+  border-radius: 18px;
+  object-fit: contain;
+  border: 1px solid #dbe3ef;
+  background: #fff;
+}
+
+.splash-card h1 {
+  margin: 4px 0 0;
+  font-size: 1.9rem;
+  line-height: 1;
+}
+
+.splash-card p {
+  margin: 0;
+  color: #334155;
+}
+
+.splash-cmyk {
+  display: inline-flex;
+  gap: 4px;
+  margin: 4px 0 2px;
+}
+
+.splash-cmyk i {
+  width: 34px;
+  height: 5px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.splash-cmyk i:nth-child(1) { background: #06b6d4; }
+.splash-cmyk i:nth-child(2) { background: #ec4899; }
+.splash-cmyk i:nth-child(3) { background: #facc15; }
+.splash-cmyk i:nth-child(4) { background: #111827; }
+
+@keyframes splashPop {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 .auth-card {
   width: min(460px, 100%);
   background: var(--surface);
@@ -96,6 +172,37 @@ body {
 .auth-card p {
   margin: 8px 0 18px;
   color: var(--muted);
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auth-brand-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #0f172a;
+  font-size: 1.45rem;
+  font-weight: 900;
+  background: linear-gradient(135deg, #60a5fa, #f472b6, #facc15);
+}
+
+.auth-brand-logo {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  object-fit: contain;
+  border: 1px solid #dbe3ef;
+  background: #fff;
+}
+
+.auth-brand + p {
+  margin-top: 12px;
 }
 
 .auth-card form {
@@ -273,6 +380,15 @@ body {
   color: #1e1b4b;
   background: linear-gradient(135deg, #a5b4fc, #818cf8);
   box-shadow: 0 8px 16px rgba(79, 70, 229, 0.25);
+}
+
+.brand-logo {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  object-fit: contain;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: #fff;
 }
 
 .brand h2 {

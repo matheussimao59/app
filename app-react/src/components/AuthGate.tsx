@@ -17,6 +17,7 @@ export function AuthGate({ children }: AuthGateProps) {
   const [error, setError] = useState<string | null>(null);
   const [isSignUp, setIsSignUp] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [splashDone, setSplashDone] = useState(false);
   const accountRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -24,6 +25,11 @@ export function AuthGate({ children }: AuthGateProps) {
     const savedEmail = localStorage.getItem(SAVED_EMAIL_KEY);
     if (remembered === "0") setRememberLogin(false);
     if (savedEmail) setEmail(savedEmail);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSplashDone(true), 1400);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -105,12 +111,23 @@ export function AuthGate({ children }: AuthGateProps) {
     await supabase.auth.signOut();
   }
 
-  if (loading) {
+  if (!splashDone || loading) {
     return (
-      <div className="center-screen login-bg">
-        <div className="loading-indicator">
-          <span className="loading-spinner" aria-hidden="true" />
-          <span>Carregando...</span>
+      <div className="center-screen splash-bg">
+        <div className="splash-card">
+          <img src="/logo.jpg" alt="Única Print" className="splash-logo-image" />
+          <h1>Única Print</h1>
+          <p>Soluções Gráficas</p>
+          <div className="splash-cmyk" aria-hidden>
+            <i />
+            <i />
+            <i />
+            <i />
+          </div>
+          <div className="loading-indicator">
+            <span className="loading-spinner" aria-hidden="true" />
+            <span>Carregando...</span>
+          </div>
         </div>
       </div>
     );
@@ -149,8 +166,14 @@ export function AuthGate({ children }: AuthGateProps) {
   return (
     <div className="center-screen login-bg">
       <div className="auth-card">
-        <h1>Financeiro</h1>
-        <p>Faca login para continuar.</p>
+        <div className="auth-brand">
+          <img src="/logo.jpg" alt="Única Print" className="auth-brand-logo" />
+          <div>
+            <h1>Única Print</h1>
+            <p>Soluções Gráficas</p>
+          </div>
+        </div>
+        <p>Acesse sua conta para continuar.</p>
         {info && <p className="info">{info}</p>}
         <form onSubmit={handleSubmit}>
           <label>
@@ -191,3 +214,5 @@ export function AuthGate({ children }: AuthGateProps) {
     </div>
   );
 }
+
+

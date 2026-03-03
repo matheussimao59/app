@@ -1,0 +1,42 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" role="img" aria-labelledby="title desc">
+  <title id="title">Única Print Soluções Gráficas</title>
+  <desc id="desc">Logo com camaleão e cores vivas</desc>
+  <defs>
+    <linearGradient id="brandGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00c2ff"/>
+      <stop offset="48%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#ff2da3"/>
+    </linearGradient>
+    <linearGradient id="chamGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1dd3b0"/>
+      <stop offset="50%" stop-color="#00a8ff"/>
+      <stop offset="100%" stop-color="#6a00ff"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="18" y="18" width="114" height="114" rx="26" fill="url(#brandGrad)"/>
+  <path d="M45 48v30c0 16 12 28 30 28s30-12 30-28V48H88v30c0 8-6 13-13 13s-13-5-13-13V48z" fill="#fff"/>
+
+  <g fill="#0f172a" font-family="Aptos, Segoe UI, Arial, sans-serif" font-weight="900">
+    <text x="152" y="94" font-size="78" letter-spacing="1.5">ÚNICA</text>
+    <text x="152" y="176" font-size="108" letter-spacing="2">PRINT</text>
+  </g>
+
+  <g transform="translate(350 30)">
+    <path d="M20 62c20-34 72-34 95 0 12 17 14 38 7 57-9 24-33 42-59 44-21 1-41-8-53-24 11 4 22 4 31-1-16-6-26-22-24-39 2-18 14-32 31-37-8 7-13 17-12 28 3-13 13-24 26-28 13-4 28-1 39 7-23-4-45 10-50 31-4 18 4 37 20 46 17 9 38 6 51-8 12-12 16-31 8-47-8-16-25-26-43-24-26 2-47 24-50 50-2 17 4 34 16 45-18-6-31-23-33-42-2-21 7-43 24-58z" fill="url(#chamGrad)"/>
+    <circle cx="41" cy="66" r="12" fill="#0f172a"/>
+    <circle cx="41" cy="66" r="6.2" fill="#ffffff"/>
+    <circle cx="41" cy="66" r="2.8" fill="#0f172a"/>
+    <path d="M16 88c13 5 27 5 40 0" stroke="#0f172a" stroke-width="4" stroke-linecap="round" fill="none"/>
+    <path d="M89 130c21 6 34 27 30 49-3 16-14 29-28 35 8-10 11-24 7-36-4-13-14-23-27-27z" fill="none" stroke="#6a00ff" stroke-width="10" stroke-linecap="round"/>
+  </g>
+
+  <text x="152" y="224" fill="#334155" font-family="Aptos, Segoe UI, Arial, sans-serif" font-size="42" font-weight="600">Soluções Gráficas</text>
+
+  <g transform="translate(152 248)">
+    <rect x="0" y="0" width="92" height="12" rx="6" fill="#00c2ff"/>
+    <rect x="102" y="0" width="92" height="12" rx="6" fill="#ff2da3"/>
+    <rect x="204" y="0" width="92" height="12" rx="6" fill="#ffe600"/>
+    <rect x="306" y="0" width="92" height="12" rx="6" fill="#111827"/>
+  </g>
+</svg>

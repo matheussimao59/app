@@ -176,10 +176,10 @@ export function AppLayout() {
     <div className="app-shell">
       <aside className={menuOpen ? "sidebar open" : "sidebar"}>
         <div className="brand">
-          <div className="brand-mark">F</div>
+          <img src="/logo.jpg" alt="Única Print" className="brand-logo" />
           <div>
-            <h2>Financeiro</h2>
-            <p>Suite de gestao operacional</p>
+            <h2>Única Print</h2>
+            <p>Soluções Gráficas</p>
           </div>
         </div>
 
@@ -316,4 +316,6 @@ export function AppLayout() {
     </div>
   );
 }
+
+
 
