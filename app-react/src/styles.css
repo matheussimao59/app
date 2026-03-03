@@ -1375,6 +1375,45 @@ body {
   color: #0f172a;
 }
 
+.ml-day-filter-bar {
+  margin: 0 0 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ml-day-filter-info {
+  display: grid;
+  gap: 2px;
+}
+
+.ml-day-filter-info strong {
+  font-size: 0.92rem;
+  color: #0f172a;
+}
+
+.ml-day-filter-info span {
+  font-size: 0.8rem;
+  color: #475569;
+}
+
+.ml-day-filter-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ml-day-filter-field {
+  min-width: 170px;
+}
+
 .ml-separacao-track-field {
   min-width: 240px;
   max-width: 360px;
@@ -1582,6 +1621,11 @@ body {
   min-width: 170px;
 }
 
+.ml-packed-order-actions .danger-btn {
+  flex: 1;
+  min-width: 170px;
+}
+
 .scan-live-indicator {
   display: inline-flex;
   align-items: center;
@@ -1665,6 +1709,17 @@ body {
     flex-direction: column;
     align-items: flex-start;
     gap: 6px;
+  }
+
+  .ml-orders-head-tools {
+    width: 100%;
+    display: grid;
+    gap: 6px;
+  }
+
+  .ml-head-date-filter {
+    min-width: 0;
+    width: 100%;
   }
 
   .ml-upload-row {
@@ -1756,6 +1811,12 @@ body {
   .ml-thumb-fallback {
     width: 46px;
     height: 46px;
+  }
+
+  .ml-production-thumb,
+  .ml-production-thumb-fallback {
+    width: 64px;
+    height: 64px;
   }
 
   .ml-scan-fab {
@@ -1872,6 +1933,11 @@ body {
   }
 
   .ml-packed-order-actions .primary-btn {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .ml-packed-order-actions .danger-btn {
     min-width: 0;
     width: 100%;
   }
@@ -2042,6 +2108,16 @@ body {
   font-size: 0.82rem;
 }
 
+.ml-orders-head-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ml-head-date-filter {
+  min-width: 180px;
+}
+
 .ml-order-filters {
   display: flex;
   gap: 8px;
@@ -2184,6 +2260,13 @@ body {
   justify-content: center;
   background: #f8fafc;
   font-size: 0.72rem;
+}
+
+.ml-production-thumb,
+.ml-production-thumb-fallback {
+  width: 78px;
+  height: 78px;
+  border-radius: 8px;
 }
 
 .assistant-modal-backdrop {
@@ -3282,6 +3365,10 @@ body {
   display: none;
 }
 
+.app-install-banner {
+  display: none;
+}
+
 .mobile-footer-item {
   text-decoration: none;
 }
@@ -3331,6 +3418,45 @@ body {
 
 .mobile-overlay {
   display: none;
+}
+
+@media (max-width: 900px) {
+  .app-install-banner {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: 74px;
+    z-index: 120;
+    border: 1px solid #bfdbfe;
+    border-radius: 14px;
+    background: #eff6ff;
+    box-shadow: 0 10px 22px rgba(30, 64, 175, 0.18);
+    padding: 10px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .app-install-banner-text {
+    display: grid;
+    gap: 2px;
+  }
+
+  .app-install-banner-text strong {
+    color: #1e3a8a;
+    font-size: 0.9rem;
+  }
+
+  .app-install-banner-text span {
+    color: #334155;
+    font-size: 0.78rem;
+    line-height: 1.25;
+  }
+
+  .app-install-banner-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
 }
 
 @media (max-width: 1024px) {
@@ -3795,6 +3921,100 @@ body {
 .print-test-page {
   display: grid;
   gap: 14px;
+}
+
+.print-submenu {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.print-thermal-wrap {
+  display: grid;
+  gap: 12px;
+}
+
+.print-thermal-grid {
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  align-items: end;
+}
+
+.print-thermal-grid textarea {
+  width: 100%;
+  min-height: 90px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 8px 10px;
+  resize: vertical;
+  font: inherit;
+}
+
+.print-thermal-grid select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  background: #fff;
+}
+
+.print-checkbox-field {
+  display: grid;
+  align-content: center;
+}
+
+.print-checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  color: #334155;
+}
+
+.print-thermal-preview-wrap {
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.print-thermal-label-preview {
+  width: 170px;
+  min-height: 114px;
+  border: 1px dashed #94a3b8;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  justify-items: center;
+}
+
+.print-thermal-label-preview img {
+  object-fit: contain;
+}
+
+.print-thermal-label-preview p {
+  margin: 0;
+  width: 100%;
+  text-align: center;
+  line-height: 1.1;
+  font-weight: 700;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.print-thermal-label-preview span {
+  font-size: 0.76rem;
+  color: #64748b;
 }
 
 .print-driver-guide {

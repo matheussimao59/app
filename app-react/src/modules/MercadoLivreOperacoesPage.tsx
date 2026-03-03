@@ -141,6 +141,12 @@ export function MercadoLivreOperacoesPage() {
               <button type="button" className="primary-btn" onClick={() => navigate("/mercado-livre/importacao")}>
                 Abrir importacao
               </button>
+              <button type="button" className="ghost-btn" onClick={() => navigate("/mercado-livre/pedidos-envio")}>
+                Ir para pedidos
+              </button>
+              <button type="button" className="ghost-btn" onClick={() => navigate("/mercado-livre/pedidos-envio?scanner=1")}>
+                Abrir scanner direto
+              </button>
             </div>
           </article>
         </div>

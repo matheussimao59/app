@@ -53,6 +53,11 @@ function isOrderPacked(row: ShippingOrder | null | undefined) {
   return packed === true;
 }
 
+function isProductionSeparated(row: ShippingOrder | null | undefined) {
+  const separated = row?.row_raw && typeof row.row_raw === "object" ? row.row_raw.production_separated : null;
+  return separated === true;
+}
+
 function normalizeText(text?: string) {
   return String(text || "")
     .normalize("NFD")
@@ -345,6 +350,8 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [deletingFiltered, setDeletingFiltered] = useState(false);
+  const [deletingDateList, setDeletingDateList] = useState(false);
+  const [separatingProductionKey, setSeparatingProductionKey] = useState<string | null>(null);
   const [packingOrderId, setPackingOrderId] = useState<string | null>(null);
   const [unpackingOrderId, setUnpackingOrderId] = useState<string | null>(null);
   const [webCameraEnabled, setWebCameraEnabled] = useState(false);
@@ -482,13 +489,17 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
 
       const keys = payload.map((row) => row.import_key);
       const existingKeys = new Set<string>();
+      const existingRowsByKey = new Map<
+        string,
+        { id: string; observations: string | null; row_raw: Record<string, unknown> | null }
+      >();
       const chunkSize = 400;
 
       for (let i = 0; i < keys.length; i += chunkSize) {
         const chunk = keys.slice(i, i + chunkSize);
         const { data: existingRows, error: existingError } = await supabase
           .from("ml_shipping_orders")
-          .select("import_key")
+          .select("id, import_key, observations, row_raw")
           .eq("user_id", userId)
           .in("import_key", chunk);
 
@@ -496,21 +507,60 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
         for (const row of existingRows || []) {
           const key = typeof row.import_key === "string" ? row.import_key : "";
           if (key) existingKeys.add(key);
+          const id = typeof row.id === "string" ? row.id : "";
+          if (key && id) {
+            existingRowsByKey.set(key, {
+              id,
+              observations: typeof row.observations === "string" ? row.observations : null,
+              row_raw: (row.row_raw as Record<string, unknown> | null) || null
+            });
+          }
         }
       }
 
       const onlyNewRows = payload.filter((row) => !existingKeys.has(row.import_key));
+      const existingRowsWithNewObservation = preparedRows.filter((row) => {
+        const existing = existingRowsByKey.get(row.importKey);
+        if (!existing) return false;
+        const nextObservation = String(row.db.observations || "").trim();
+        if (!nextObservation) return false;
+        const currentObservation = String(existing.observations || "").trim();
+        return nextObservation !== currentObservation;
+      });
 
       if (onlyNewRows.length > 0) {
         const { error: saveError } = await supabase.from("ml_shipping_orders").insert(onlyNewRows);
         if (saveError) throw new Error(saveError.message);
       }
 
+      let updatedObservations = 0;
+      for (const row of existingRowsWithNewObservation) {
+        const existing = existingRowsByKey.get(row.importKey);
+        if (!existing) continue;
+        const nextObservation = String(row.db.observations || "").trim();
+        const nextRaw = { ...(existing.row_raw || {}) };
+        nextRaw.observations = nextObservation;
+
+        const { error: updateError } = await supabase
+          .from("ml_shipping_orders")
+          .update({
+            observations: nextObservation,
+            row_raw: nextRaw,
+            updated_at: new Date().toISOString()
+          })
+          .eq("user_id", userId)
+          .eq("id", existing.id);
+
+        if (updateError) throw new Error(updateError.message);
+        updatedObservations += 1;
+      }
+
       await loadSavedOrders(userId);
       const ignoredCount = payload.length - onlyNewRows.length;
       setStatus(
         `${onlyNewRows.length} etiqueta(s) nova(s) importada(s). ` +
-          `${Math.max(0, ignoredCount)} etiqueta(s) ja existia(m) e foi(ram) ignorada(s).`
+          `${Math.max(0, ignoredCount)} etiqueta(s) ja existia(m) e foi(ram) ignorada(s). ` +
+          `${updatedObservations} observacao(oes) atualizada(s).`
       );
     } catch (e) {
       const message = e instanceof Error ? e.message : "Falha ao salvar pedidos.";
@@ -717,6 +767,118 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
     }
   }
 
+  async function deleteOrdersByActiveDate() {
+    if (!supabase || !userId) return;
+    if (!shippingDateFilter) {
+      setError("Selecione uma data para excluir a lista inteira do dia.");
+      return;
+    }
+    if (!ordersBySelectedDate.length) {
+      setError("Nao ha pedidos na data ativa para excluir.");
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `Excluir TODOS os ${ordersBySelectedDate.length} pedido(s) da data ${formatDateOnly(shippingDateFilter)}?`
+    );
+    if (!shouldDelete) return;
+
+    setDeletingDateList(true);
+    setError(null);
+    setStatus(null);
+
+    try {
+      const ids = ordersBySelectedDate.map((row) => row.id);
+      const chunkSize = 400;
+      let removedTotal = 0;
+
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        const { data, error: removeError } = await supabase
+          .from("ml_shipping_orders")
+          .delete()
+          .eq("user_id", userId)
+          .in("id", chunk)
+          .select("id");
+
+        if (removeError) throw new Error(removeError.message);
+        removedTotal += Array.isArray(data) ? data.length : 0;
+      }
+
+      const deletedSet = new Set(ids);
+      setSavedOrders((prev) => prev.filter((row) => !deletedSet.has(row.id)));
+      if (selectedOrder && deletedSet.has(selectedOrder.id)) setSelectedOrder(null);
+      setStatus(`${removedTotal} pedido(s) excluido(s) da lista da data ativa.`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Falha ao excluir lista da data.";
+      setError(`Nao foi possivel excluir lista do dia: ${message}`);
+    } finally {
+      setDeletingDateList(false);
+    }
+  }
+
+  async function markProductionGroupAsSeparated(row: { key: string; info: string; orderIds: string[] }) {
+    if (!supabase || !userId) return;
+    if (previewRows.length > 0) {
+      setError("Salve a lista no sistema antes de marcar producao como separada.");
+      return;
+    }
+    if (!row.orderIds.length) {
+      setError("Nenhum pedido encontrado para este grupo.");
+      return;
+    }
+
+    const shouldMark = window.confirm(`Marcar o grupo "${row.info}" como separado?`);
+    if (!shouldMark) return;
+
+    setSeparatingProductionKey(row.key);
+    setError(null);
+    setStatus(null);
+
+    try {
+      const nowIso = new Date().toISOString();
+      const ordersMap = new Map(savedOrders.map((item) => [item.id, item]));
+      let updatedCount = 0;
+
+      for (const orderId of row.orderIds) {
+        const order = ordersMap.get(orderId);
+        if (!order) continue;
+        if (isProductionSeparated(order)) continue;
+        const nextRaw = { ...(order.row_raw || {}), production_separated: true, production_separated_at: nowIso };
+
+        const { error: updateError } = await supabase
+          .from("ml_shipping_orders")
+          .update({ row_raw: nextRaw, updated_at: nowIso })
+          .eq("user_id", userId)
+          .eq("id", order.id);
+
+        if (updateError) throw new Error(updateError.message);
+        updatedCount += 1;
+      }
+
+      if (updatedCount > 0) {
+        setSavedOrders((prev) =>
+          prev.map((item) =>
+            row.orderIds.includes(item.id)
+              ? {
+                  ...item,
+                  updated_at: nowIso,
+                  row_raw: { ...(item.row_raw || {}), production_separated: true, production_separated_at: nowIso }
+                }
+              : item
+          )
+        );
+      }
+
+      setStatus(`${updatedCount} pedido(s) marcado(s) como separado(s) na producao.`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Falha ao marcar separacao de producao.";
+      setError(`Nao foi possivel marcar separado: ${message}`);
+    } finally {
+      setSeparatingProductionKey(null);
+    }
+  }
+
   async function markOrderAsPacked(row: ShippingOrder) {
     if (!supabase || !userId) return;
     if (isOrderPacked(row)) {
@@ -791,7 +953,10 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
   }
 
   const ordersBySelectedDate = useMemo(
-    () => savedOrders.filter((row) => shippingDateFromRaw(row.row_raw) === shippingDateFilter),
+    () =>
+      shippingDateFilter
+        ? savedOrders.filter((row) => shippingDateFromRaw(row.row_raw) === shippingDateFilter)
+        : savedOrders,
     [savedOrders, shippingDateFilter]
   );
 
@@ -810,15 +975,19 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
     if (!normalized) return;
 
     const exact =
-      savedOrders.find((row) => normalizeTracking(row.tracking_number || "") === normalized) ||
+      ordersBySelectedDate.find((row) => normalizeTracking(row.tracking_number || "") === normalized) ||
       null;
     const firstContains =
-      savedOrders.find((row) => normalizeTracking(row.tracking_number || "").includes(normalized)) ||
+      ordersBySelectedDate.find((row) => normalizeTracking(row.tracking_number || "").includes(normalized)) ||
       null;
     const target = exact || firstContains;
 
     if (!target) {
-      setScanStatus(`Rastreio ${normalized} nao encontrado.`);
+      setScanStatus(
+        shippingDateFilter
+          ? `Rastreio ${normalized} nao encontrado na data ${formatDateOnly(shippingDateFilter)}.`
+          : `Rastreio ${normalized} nao encontrado.`
+      );
       return;
     }
 
@@ -1028,13 +1197,17 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             adName: row.adName,
             sku: row.sku,
             imageUrl: row.imageUrl,
-            productQty: Math.max(1, Number(row.productQty) || 1)
+            productQty: Math.max(1, Number(row.productQty) || 1),
+            orderId: "",
+            productionSeparated: false
           }))
         : ordersBySelectedDate.map((row) => ({
             adName: row.ad_name || "",
             sku: safeRawValue(row.row_raw, "sku"),
             imageUrl: row.image_url || safeRawValue(row.row_raw, "image_url"),
-            productQty: Math.max(1, Number(row.product_qty) || 1)
+            productQty: Math.max(1, Number(row.product_qty) || 1),
+            orderId: row.id,
+            productionSeparated: isProductionSeparated(row)
           }));
 
     const grouped = new Map<
@@ -1048,6 +1221,8 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
         cartQty: number;
         totalProduce: number;
         ordersCount: number;
+        separatedOrders: number;
+        orderIds: string[];
       }
     >();
 
@@ -1065,21 +1240,33 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
         unitsPerAd,
         cartQty: 0,
         totalProduce: 0,
-        ordersCount: 0
+        ordersCount: 0,
+        separatedOrders: 0,
+        orderIds: []
       };
 
       current.cartQty += Math.max(1, Number(row.productQty) || 1);
       current.totalProduce += Math.max(1, Number(row.productQty) || 1) * unitsPerAd;
       current.ordersCount += 1;
+      if (row.productionSeparated) current.separatedOrders += 1;
+      if (row.orderId) current.orderIds.push(row.orderId);
       if (!current.imageUrl && row.imageUrl) current.imageUrl = row.imageUrl;
       grouped.set(key, current);
     }
 
     return [...grouped.values()].sort((a, b) => b.totalProduce - a.totalProduce);
   }, [previewRows, previewRowsBySelectedDate, ordersBySelectedDate]);
+  const productionPendingRows = useMemo(
+    () => productionRows.filter((row) => row.separatedOrders < row.ordersCount),
+    [productionRows]
+  );
+  const productionSeparatedRows = useMemo(
+    () => productionRows.filter((row) => row.separatedOrders >= row.ordersCount && row.ordersCount > 0),
+    [productionRows]
+  );
 
   const showKpis = view === "all" || view === "calendario" || view === "producao" || view === "pedidos";
-  const showImportMenu = view === "all" || view === "importacao" || view === "pedidos";
+  const showImportMenu = view === "all" || view === "importacao";
   const showShippingCalendar = view === "all" || view === "calendario" || view === "pedidos";
   const showProduction = view === "all" || view === "producao";
   const showTrackingList = view === "all" || view === "pedidos";
@@ -1104,6 +1291,14 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
           : view === "pedidos"
             ? "Conferencia por rastreio, scanner e status de embalagem."
             : "Importe pedidos em .xlsx, organize por rastreio e consulte dados rapidamente para envio e conferencia.";
+  const selectedDayLabel = shippingDateFilter ? formatDateOnly(shippingDateFilter) : "Todos os dias";
+  const noResultMessage = trackingSearch
+    ? shippingDateFilter
+      ? `Nenhum pedido encontrado para o rastreio informado na data ${selectedDayLabel}.`
+      : "Nenhum pedido encontrado para o rastreio informado."
+    : shippingDateFilter
+      ? `Nenhum pedido encontrado para a data ${selectedDayLabel}.`
+      : "Nenhum pedido encontrado.";
 
   return (
     <section className="page ml-separacao-page">
@@ -1114,26 +1309,58 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
         </div>
       </div>
 
+      <div className="ml-day-filter-bar">
+        <div className="ml-day-filter-info">
+          <strong>Data ativa: {selectedDayLabel}</strong>
+          <span>Toda a tela de pedidos usa esta data.</span>
+        </div>
+        <div className="ml-day-filter-actions">
+          <label className="field ml-day-filter-field" style={{ marginBottom: 0 }}>
+            <span>Selecionar dia</span>
+            <input
+              type="date"
+              value={shippingDateFilter}
+              onChange={(e) => setShippingDateFilter(normalizeDateToYmd(e.target.value))}
+            />
+          </label>
+          <button type="button" className="ghost-btn" onClick={() => setShippingDateFilter(todayYmd)}>
+            Ver hoje
+          </button>
+          <button type="button" className="ghost-btn" onClick={() => setShippingDateFilter("")}>
+            Limpar filtro
+          </button>
+          <button
+            type="button"
+            className="danger-btn"
+            onClick={() => void deleteOrdersByActiveDate()}
+            disabled={deletingDateList || loadingInit || !shippingDateFilter || ordersBySelectedDate.length === 0}
+            title={!shippingDateFilter ? "Selecione uma data para excluir a lista" : "Excluir lista inteira da data ativa"}
+          >
+            {deletingDateList ? "Excluindo lista..." : "Excluir lista do dia"}
+          </button>
+        </div>
+      </div>
+
       {showKpis && <div className="ml-kpi-grid ml-production-kpis ml-separacao-kpis">
         <article className="kpi-card">
           <p>Pedidos salvos</p>
           <strong>{stats.totalOrders}</strong>
-          <span>Base para expedicao</span>
+          <span>Dia {selectedDayLabel}</span>
         </article>
         <article className="kpi-card">
           <p>Rastreios unicos</p>
           <strong>{stats.totalTrackings}</strong>
-          <span>Codigos para busca</span>
+          <span>Dia {selectedDayLabel}</span>
         </article>
         <article className="kpi-card">
           <p>Qtd total de produtos</p>
           <strong>{stats.totalQty}</strong>
-          <span>Total de itens</span>
+          <span>Dia {selectedDayLabel}</span>
         </article>
         <article className="kpi-card">
-          <p>Ultima importacao</p>
-          <strong>{fileName ? "Pronta" : "-"}</strong>
-          <span>{fileName || "Nenhum arquivo importado"}</span>
+          <p>Filtro de data</p>
+          <strong>{selectedDayLabel}</strong>
+          <span>Base dos cards e listas</span>
         </article>
         <button
           type="button"
@@ -1143,7 +1370,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
         >
           <p>Pedidos Embalados</p>
           <strong>{stats.packedOrders}</strong>
-          <span>Pedidos marcados como embalados</span>
+          <span>Dia {selectedDayLabel}</span>
         </button>
         <button
           type="button"
@@ -1153,7 +1380,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
         >
           <p>Pedidos Sem embalar</p>
           <strong>{stats.unpackedOrders}</strong>
-          <span>Total de pedidos pendentes de embalagem</span>
+          <span>Dia {selectedDayLabel}</span>
         </button>
       </div>}
 
@@ -1249,7 +1476,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             <input
               type="date"
               value={shippingDateFilter}
-              onChange={(e) => setShippingDateFilter(normalizeDateToYmd(e.target.value) || todayYmd)}
+              onChange={(e) => setShippingDateFilter(normalizeDateToYmd(e.target.value))}
             />
           </label>
           <button
@@ -1287,7 +1514,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
               className="ghost-btn"
               onClick={() => {
                 setTrackingSearch("");
-                setShippingDateFilter(todayYmd);
+                setShippingDateFilter("");
                 setScanStatus(null);
                 trackingInputRef.current?.focus();
               }}
@@ -1354,10 +1581,10 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                           type="button"
                           className={shippingDateFilter === day.shippingDate ? "primary-btn" : "ghost-btn"}
                           onClick={() =>
-                            setShippingDateFilter((prev) => (prev === day.shippingDate ? todayYmd : day.shippingDate))
+                            setShippingDateFilter((prev) => (prev === day.shippingDate ? "" : day.shippingDate))
                           }
                         >
-                          {shippingDateFilter === day.shippingDate ? "Hoje" : "Filtrar dia"}
+                          {shippingDateFilter === day.shippingDate ? "Remover filtro" : "Filtrar dia"}
                         </button>
                       ) : (
                         "-"
@@ -1374,7 +1601,94 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
       {showProduction && <div className="ml-orders-table-wrap">
         <div className="ml-orders-head">
           <h3>Separacao de producao</h3>
-          <span>{productionRows.length} grupo(s)</span>
+          <div className="ml-orders-head-tools">
+            <label className="field ml-head-date-filter" style={{ marginBottom: 0 }}>
+              <span>Filtrar dia</span>
+              <input
+                type="date"
+                value={shippingDateFilter}
+                onChange={(e) => setShippingDateFilter(normalizeDateToYmd(e.target.value))}
+              />
+            </label>
+            <span>{productionPendingRows.length} pendente(s)</span>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table className="table clean ml-shipping-table">
+            <thead>
+              <tr>
+                <th>Foto</th>
+                <th>Informacao</th>
+                <th>SKU</th>
+                <th>Und por anuncio</th>
+                <th>Qtd carrinho</th>
+                <th>Total produzir</th>
+                <th>Pedidos</th>
+                <th>Acao</th>
+              </tr>
+            </thead>
+            <tbody>
+              {productionPendingRows.length === 0 ? (
+                <tr>
+                  <td colSpan={8}>Sem dados pendentes para separar producao.</td>
+                </tr>
+              ) : (
+                productionPendingRows.map((row) => (
+                  <tr key={row.key}>
+                    <td data-label="Foto">
+                      {row.imageUrl ? (
+                        <img
+                          className="ml-thumb ml-production-thumb"
+                          src={String(row.imageUrl).replace(/^http:\/\//i, "https://")}
+                          alt={row.info}
+                          loading="lazy"
+                          onError={(e) => {
+                            const img = e.currentTarget;
+                            img.style.display = "none";
+                            const fallback = img.nextElementSibling as HTMLElement | null;
+                            if (fallback) fallback.style.display = "inline-flex";
+                          }}
+                        />
+                      ) : null}
+                      <span className="ml-thumb-fallback ml-production-thumb-fallback" style={{ display: row.imageUrl ? "none" : "inline-flex" }}>
+                        📦
+                      </span>
+                    </td>
+                    <td className="ml-col-title" data-label="Informacao">{row.info}</td>
+                    <td data-label="SKU">{row.sku}</td>
+                    <td data-label="Und por anuncio">{row.unitsPerAd}</td>
+                    <td data-label="Qtd carrinho">{row.cartQty}</td>
+                    <td data-label="Total produzir">
+                      <strong>{row.totalProduce}</strong>
+                    </td>
+                    <td data-label="Pedidos">{row.ordersCount}</td>
+                    <td data-label="Acao">
+                      <button
+                        type="button"
+                        className="primary-btn"
+                        disabled={Boolean(separatingProductionKey) || previewRows.length > 0}
+                        onClick={() => void markProductionGroupAsSeparated(row)}
+                        title={previewRows.length > 0 ? "Salve a lista para marcar separado" : "Marcar como separado"}
+                      >
+                        {separatingProductionKey === row.key ? "Salvando..." : "Marcar separado"}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="page-text" style={{ marginTop: "0.55rem" }}>
+          Regra de quantidade por pedido: quando o titulo comeca com numero (ex.: 35 Lembrancinhas...), esse numero vira
+          as unidades por anuncio para calcular o total de producao.
+        </p>
+      </div>}
+
+      {showProduction && <div className="ml-orders-table-wrap">
+        <div className="ml-orders-head">
+          <h3>Pedido separado</h3>
+          <span>{productionSeparatedRows.length} grupo(s)</span>
         </div>
         <div className="table-wrap">
           <table className="table clean ml-shipping-table">
@@ -1390,17 +1704,17 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
               </tr>
             </thead>
             <tbody>
-              {productionRows.length === 0 ? (
+              {productionSeparatedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>Sem dados para separar producao.</td>
+                  <td colSpan={7}>Nenhum pedido separado ainda.</td>
                 </tr>
               ) : (
-                productionRows.map((row) => (
-                  <tr key={row.key}>
+                productionSeparatedRows.map((row) => (
+                  <tr key={`separated-${row.key}`}>
                     <td data-label="Foto">
                       {row.imageUrl ? (
                         <img
-                          className="ml-thumb"
+                          className="ml-thumb ml-production-thumb"
                           src={String(row.imageUrl).replace(/^http:\/\//i, "https://")}
                           alt={row.info}
                           loading="lazy"
@@ -1412,7 +1726,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                           }}
                         />
                       ) : null}
-                      <span className="ml-thumb-fallback" style={{ display: row.imageUrl ? "none" : "inline-flex" }}>
+                      <span className="ml-thumb-fallback ml-production-thumb-fallback" style={{ display: row.imageUrl ? "none" : "inline-flex" }}>
                         📦
                       </span>
                     </td>
@@ -1430,15 +1744,11 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             </tbody>
           </table>
         </div>
-        <p className="page-text" style={{ marginTop: "0.55rem" }}>
-          Regra de quantidade por pedido: quando o titulo comeca com numero (ex.: 35 Lembrancinhas...), esse numero vira
-          as unidades por anuncio para calcular o total de producao.
-        </p>
       </div>}
 
       {showTrackingList && <div className="ml-orders-table-wrap">
         <div className="ml-orders-head">
-          <h3>Buscar por N de Rastreio</h3>
+          <h3>Pedidos por rastreio</h3>
           <span>{filteredByTracking.length} resultado(s)</span>
         </div>
 
@@ -1464,7 +1774,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                 </tr>
               ) : filteredByTracking.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>Nenhum pedido encontrado.</td>
+                  <td colSpan={9}>{noResultMessage}</td>
                 </tr>
               ) : (
                 filteredByTracking.slice(0, 200).map((row) => (
@@ -1484,7 +1794,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                     <td data-label="Excluir">
                       <button
                         type="button"
-                        className="ghost-btn"
+                        className="danger-btn"
                         onClick={() => void deleteSavedOrder(row)}
                         disabled={deletingOrderId === row.id}
                       >
@@ -1717,7 +2027,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                         </button>
                         <button
                           type="button"
-                          className="ghost-btn"
+                          className="danger-btn"
                           disabled={Boolean(deletingOrderId)}
                           onClick={() => void deleteSavedOrder(row)}
                         >
@@ -1800,7 +2110,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                         </button>
                         <button
                           type="button"
-                          className="ghost-btn"
+                          className="danger-btn"
                           disabled={Boolean(deletingOrderId)}
                           onClick={() => void deleteSavedOrder(row)}
                         >

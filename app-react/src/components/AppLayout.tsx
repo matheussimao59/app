@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 type BaseNavItem = {
@@ -96,6 +96,9 @@ function NavIcon({ id }: { id: string }) {
 export function AppLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [mlMenuOpen, setMlMenuOpen] = useState(true);
+  const [installPromptEvent, setInstallPromptEvent] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [iosHint, setIosHint] = useState(false);
   const location = useLocation();
   const mlActive = location.pathname.startsWith("/mercado-livre");
 
@@ -115,6 +118,48 @@ export function AppLayout() {
 
   function openAccountMenu() {
     window.dispatchEvent(new CustomEvent("app-account-toggle"));
+  }
+
+  useEffect(() => {
+    const isMobile = window.matchMedia("(max-width: 900px)").matches;
+    if (!isMobile) return;
+
+    const dismissed = localStorage.getItem("pwa_install_dismissed") === "1";
+    if (dismissed) return;
+
+    const standalone = window.matchMedia("(display-mode: standalone)").matches || Boolean((window.navigator as any).standalone);
+    if (standalone) return;
+
+    const ua = window.navigator.userAgent.toLowerCase();
+    const isIos = /iphone|ipad|ipod/.test(ua);
+    const isSafari = /safari/.test(ua) && !/chrome|crios|fxios|edgios/.test(ua);
+    if (isIos && isSafari) {
+      setIosHint(true);
+      setShowInstallBanner(true);
+    }
+
+    const onBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPromptEvent(event);
+      setShowInstallBanner(true);
+    };
+
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt as EventListener);
+    return () => window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt as EventListener);
+  }, []);
+
+  async function onInstallClick() {
+    if (!installPromptEvent) return;
+    const promptEvent = installPromptEvent as any;
+    await promptEvent.prompt();
+    await promptEvent.userChoice;
+    setShowInstallBanner(false);
+    setInstallPromptEvent(null);
+  }
+
+  function onDismissInstall() {
+    localStorage.setItem("pwa_install_dismissed", "1");
+    setShowInstallBanner(false);
   }
 
   return (
@@ -179,6 +224,29 @@ export function AppLayout() {
       {menuOpen && <button className="mobile-overlay" type="button" onClick={closeMenu} />}
 
       <main className="content">
+        {showInstallBanner && (
+          <div className="app-install-banner">
+            <div className="app-install-banner-text">
+              <strong>Instalar app no celular</strong>
+              <span>
+                {iosHint
+                  ? "No Safari: toque em Compartilhar e depois em Adicionar a Tela de Inicio."
+                  : "Instale para abrir mais rapido e usar como app no celular."}
+              </span>
+            </div>
+            <div className="app-install-banner-actions">
+              {!iosHint && installPromptEvent && (
+                <button type="button" className="primary-btn" onClick={() => void onInstallClick()}>
+                  Instalar
+                </button>
+              )}
+              <button type="button" className="ghost-btn" onClick={onDismissInstall}>
+                Fechar
+              </button>
+            </div>
+          </div>
+        )}
+
         <nav className="mobile-footer-bar" aria-label="Atalhos mobile">
           <button
             className="mobile-footer-item mobile-menu-btn"
@@ -231,3 +299,4 @@ export function AppLayout() {
     </div>
   );
 }
+
