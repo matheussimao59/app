@@ -107,6 +107,7 @@ export function AppLayout() {
   const [mlMenuOpen, setMlMenuOpen] = useState(true);
   const [installPromptEvent, setInstallPromptEvent] = useState<any>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [showUpdateBanner, setShowUpdateBanner] = useState(false);
   const [iosHint, setIosHint] = useState(false);
   const location = useLocation();
   const mlActive = location.pathname.startsWith("/mercado-livre");
@@ -158,6 +159,12 @@ export function AppLayout() {
     return () => window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt as EventListener);
   }, []);
 
+  useEffect(() => {
+    const onUpdateAvailable = () => setShowUpdateBanner(true);
+    window.addEventListener("app-update-available", onUpdateAvailable as EventListener);
+    return () => window.removeEventListener("app-update-available", onUpdateAvailable as EventListener);
+  }, []);
+
   async function onInstallClick() {
     if (!installPromptEvent) return;
     const promptEvent = installPromptEvent as any;
@@ -170,6 +177,12 @@ export function AppLayout() {
   function onDismissInstall() {
     localStorage.setItem("pwa_install_dismissed", "1");
     setShowInstallBanner(false);
+  }
+
+  function onApplyUpdate() {
+    const apply = (window as any).__applyAppUpdate;
+    if (typeof apply === "function") apply();
+    setShowUpdateBanner(false);
   }
 
   return (
@@ -234,6 +247,23 @@ export function AppLayout() {
       {menuOpen && <button className="mobile-overlay" type="button" onClick={closeMenu} />}
 
       <main className="content">
+        {showUpdateBanner && (
+          <div className="app-update-banner">
+            <div className="app-install-banner-text">
+              <strong>Nova versao disponivel</strong>
+              <span>Toque em atualizar para carregar a versao mais recente do app.</span>
+            </div>
+            <div className="app-install-banner-actions">
+              <button type="button" className="primary-btn" onClick={onApplyUpdate}>
+                Atualizar agora
+              </button>
+              <button type="button" className="ghost-btn" onClick={() => setShowUpdateBanner(false)}>
+                Depois
+              </button>
+            </div>
+          </div>
+        )}
+
         {showInstallBanner && (
           <div className="app-install-banner">
             <div className="app-install-banner-text">

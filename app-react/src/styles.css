@@ -3500,6 +3500,10 @@ body {
   display: none;
 }
 
+.app-update-banner {
+  display: none;
+}
+
 .mobile-footer-item {
   text-decoration: none;
 }
@@ -3552,6 +3556,21 @@ body {
 }
 
 @media (max-width: 900px) {
+  .app-update-banner {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: 148px;
+    z-index: 121;
+    border: 1px solid #86efac;
+    border-radius: 14px;
+    background: #f0fdf4;
+    box-shadow: 0 10px 22px rgba(22, 163, 74, 0.18);
+    padding: 10px;
+    display: grid;
+    gap: 8px;
+  }
+
   .app-install-banner {
     position: fixed;
     left: 10px;
