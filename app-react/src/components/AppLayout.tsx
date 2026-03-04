@@ -39,6 +39,15 @@ function NavIcon({ id }: { id: string }) {
     );
   }
 
+  if (id === "capa_agenda") {
+    return (
+      <svg {...props}>
+        <path d="M6 4.5h9.5A2.5 2.5 0 0 1 18 7v13H8.5A2.5 2.5 0 0 1 6 17.5z" />
+        <path d="M8 7.5h7M8 11h7M8 14.5h5" />
+      </svg>
+    );
+  }
+
   if (id === "produtos") {
     return (
       <svg {...props}>
@@ -117,6 +126,7 @@ export function AppLayout() {
     ...(isLocalNfEnabled ? [{ id: "nota_fiscal", label: "Nota Fiscal", path: "/nota-fiscal" }] : []),
     { id: "precificacao", label: "Precificacao", path: "/precificacao" },
     { id: "calendario", label: "Calendario", path: "/calendario" },
+    { id: "capa_agenda", label: "Capa Agenda", path: "/capa-agenda" },
     { id: "produtos", label: "Meus Produtos", path: "/produtos" },
     { id: "pedidos", label: "Pedidos", path: "/mercado-livre/operacoes" },
     { id: "teste_impressao", label: "Teste de Impressao", path: "/teste-impressao" },
@@ -309,6 +319,13 @@ export function AppLayout() {
           >
             <span className="mobile-footer-icon"><NavIcon id="inicio" /></span>
             <span>Inicio</span>
+          </NavLink>
+          <NavLink
+            to="/capa-agenda"
+            className={({ isActive }) => (isActive ? "mobile-footer-item active" : "mobile-footer-item")}
+          >
+            <span className="mobile-footer-icon"><NavIcon id="capa_agenda" /></span>
+            <span>Capa</span>
           </NavLink>
           <NavLink
             to="/produtos"

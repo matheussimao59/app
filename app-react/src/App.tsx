@@ -14,6 +14,7 @@ import { TesteImpressaoPage } from "./modules/TesteImpressaoPage";
 import { NotaFiscalPage } from "./modules/NotaFiscalPage";
 import { PedidosPage } from "./modules/PedidosPage";
 import { InicioPage } from "./modules/InicioPage";
+import { CapaAgendaPage } from "./modules/CapaAgendaPage";
 
 const isLocalNfEnabled = Boolean((import.meta as any)?.env?.DEV);
 
@@ -28,6 +29,7 @@ export function App() {
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="precificacao" element={<PricingPage />} />
             <Route path="calendario" element={<CalendarPage />} />
+            <Route path="capa-agenda" element={<CapaAgendaPage />} />
             <Route path="produtos" element={<ProductsPage />} />
             <Route path="mercado-livre" element={<MercadoLivrePage />} />
             <Route path="mercado-livre/operacoes" element={<MercadoLivreOperacoesPage />} />

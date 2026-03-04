@@ -5527,6 +5527,182 @@ body {
   margin-top: 0;
 }
 
+.capa-agenda-page {
+  display: grid;
+  gap: 12px;
+}
+
+.capa-agenda-top-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.capa-agenda-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.capa-card {
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.capa-card.empty {
+  place-items: center;
+  min-height: 110px;
+}
+
+.capa-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.capa-card header span {
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.capa-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.capa-select input {
+  width: 15px;
+  height: 15px;
+}
+
+.capa-preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  justify-items: center;
+}
+
+.capa-preview-grid figure {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+  width: 116px;
+}
+
+.capa-preview-grid img {
+  width: 116px;
+  height: 158px;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid #dbe3ef;
+  background: #f8fafc;
+}
+
+.capa-preview-grid figcaption {
+  text-align: center;
+  font-size: 0.7rem;
+  color: #475569;
+  font-weight: 700;
+}
+
+.capa-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.capa-actions button {
+  flex: 1;
+  min-width: 108px;
+}
+
+.capa-upload-modal {
+  width: min(760px, 96vw);
+  border-radius: 16px;
+  border: 1px solid #c7d2fe;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+}
+
+.capa-upload-form {
+  display: grid;
+  gap: 10px;
+}
+
+.capa-upload-head {
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.capa-upload-head h3 {
+  color: #1e3a8a;
+}
+
+.capa-upload-tip {
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+  padding: 8px 10px;
+}
+
+.capa-upload-tip p {
+  margin: 0;
+  color: #1e3a8a;
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+
+.capa-upload-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.capa-upload-field {
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  background: #fff;
+  padding: 8px;
+}
+
+.capa-upload-field span {
+  font-weight: 700;
+}
+
+.capa-upload-preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.capa-upload-preview img,
+.capa-upload-preview .empty {
+  width: 100%;
+  height: 220px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #dbe3ef;
+  background: #f8fafc;
+}
+
+.capa-upload-preview .empty {
+  display: grid;
+  place-items: center;
+  color: #64748b;
+}
+
+.capa-upload-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 @media (max-width: 980px) {
   .inicio-hero {
     grid-template-columns: 1fr;
@@ -5536,6 +5712,26 @@ body {
     width: 100%;
     max-width: 320px;
     height: 150px;
+  }
+
+  .capa-upload-row,
+  .capa-upload-preview {
+    grid-template-columns: 1fr;
+  }
+
+  .capa-preview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .capa-preview-grid figure,
+  .capa-preview-grid img {
+    width: 104px;
+    height: 142px;
+  }
+
+  .capa-upload-preview img,
+  .capa-upload-preview .empty {
+    height: 180px;
   }
 }
 
