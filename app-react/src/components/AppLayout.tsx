@@ -144,10 +144,10 @@ export function AppLayout() {
     const ua = window.navigator.userAgent.toLowerCase();
     const isIos = /iphone|ipad|ipod/.test(ua);
     const isSafari = /safari/.test(ua) && !/chrome|crios|fxios|edgios/.test(ua);
-    if (isIos && isSafari) {
-      setIosHint(true);
-      setShowInstallBanner(true);
-    }
+    if (isIos && isSafari) setIosHint(true);
+
+    // Fallback: mostra o banner mesmo sem beforeinstallprompt.
+    setShowInstallBanner(true);
 
     const onBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
@@ -271,7 +271,9 @@ export function AppLayout() {
               <span>
                 {iosHint
                   ? "No Safari: toque em Compartilhar e depois em Adicionar a Tela de Inicio."
-                  : "Instale para abrir mais rapido e usar como app no celular."}
+                  : installPromptEvent
+                    ? "Instale para abrir mais rapido e usar como app no celular."
+                    : "No Chrome/Edge: menu do navegador > Adicionar a tela inicial."}
               </span>
             </div>
             <div className="app-install-banner-actions">

@@ -1953,7 +1953,7 @@ body {
   .ml-scan-fab {
     position: fixed;
     right: 14px;
-    bottom: 72px;
+    bottom: 108px;
     width: 54px;
     height: 54px;
     border-radius: 999px;
@@ -1974,15 +1974,15 @@ body {
   }
 
   .ml-scan-overlay {
-    padding: 0;
+    padding: 10px 10px 86px;
   }
 
   .ml-scan-overlay-inner {
-    width: 100vw;
-    height: 100vh;
-    border: 0;
-    border-radius: 0;
-    padding: 10px 10px 12px;
+    width: min(620px, 96vw);
+    height: min(76vh, 580px);
+    border: 1px solid #334155;
+    border-radius: 14px;
+    padding: 10px;
   }
 
   .ml-scan-overlay-head {

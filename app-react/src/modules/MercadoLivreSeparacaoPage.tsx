@@ -1044,10 +1044,19 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
-        audio: false
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false
+        });
+      } catch {
+        // Fallback para devices que nao respeitam facingMode.
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false
+        });
+      }
 
       const video = cameraVideoRef.current;
       if (!video) {
@@ -1075,7 +1084,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
         } catch {
           // Silencioso para evitar ruido durante loop continuo de leitura.
         }
-      }, 350);
+      }, 300);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Falha ao abrir camera.";
       setCameraError(`Nao foi possivel abrir a camera: ${message}`);
@@ -1887,6 +1896,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             </div>
             <video ref={cameraVideoRef} className="ml-scan-overlay-video" muted />
             <div className="ml-scan-overlay-help">Centralize o codigo no quadro. A leitura fecha a camera automaticamente.</div>
+            {scanStatus && <div className="ml-scan-overlay-help">{scanStatus}</div>}
           </div>
         </div>
       )}
