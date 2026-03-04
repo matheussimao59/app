@@ -1210,14 +1210,16 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             orderId: "",
             productionSeparated: false
           }))
-        : ordersBySelectedDate.map((row) => ({
-            adName: row.ad_name || "",
-            sku: safeRawValue(row.row_raw, "sku"),
-            imageUrl: row.image_url || safeRawValue(row.row_raw, "image_url"),
-            productQty: Math.max(1, Number(row.product_qty) || 1),
-            orderId: row.id,
-            productionSeparated: isProductionSeparated(row)
-          }));
+        : ordersBySelectedDate
+            .filter((row) => !isOrderPacked(row))
+            .map((row) => ({
+              adName: row.ad_name || "",
+              sku: safeRawValue(row.row_raw, "sku"),
+              imageUrl: row.image_url || safeRawValue(row.row_raw, "image_url"),
+              productQty: Math.max(1, Number(row.product_qty) || 1),
+              orderId: row.id,
+              productionSeparated: isProductionSeparated(row)
+            }));
 
     const grouped = new Map<
       string,
