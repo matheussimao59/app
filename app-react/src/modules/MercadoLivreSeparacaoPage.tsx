@@ -364,6 +364,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
   const [selectedOrder, setSelectedOrder] = useState<ShippingOrder | null>(null);
   const [showPackedOrdersModal, setShowPackedOrdersModal] = useState(false);
   const [showUnpackedOrdersModal, setShowUnpackedOrdersModal] = useState(false);
+  const [showPendingProductionModal, setShowPendingProductionModal] = useState(false);
   const [scannerMode, setScannerMode] = useState(false);
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
@@ -1371,6 +1372,18 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
     [groupedOrdersBySelectedDate]
   );
 
+  const pendingProductionOrderGroups = useMemo(
+    () =>
+      groupedOrdersBySelectedDate
+        .map((group) => {
+          const pendingRows = group.rows.filter((row) => !isOrderPacked(row) && !isProductionSeparated(row));
+          const pendingQty = pendingRows.reduce((acc, row) => acc + Math.max(1, Number(row.product_qty) || 1), 0);
+          return { group, pendingRows, pendingQty };
+        })
+        .filter((entry) => entry.pendingRows.length > 0),
+    [groupedOrdersBySelectedDate]
+  );
+
   const previewRowsBySelectedDate = useMemo(() => {
     if (!previewRows.length) return [];
     return previewRows.filter((row) => {
@@ -1848,6 +1861,14 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
               />
             </label>
             <span>{productionPendingRows.length} pendente(s)</span>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => setShowPendingProductionModal(true)}
+              title="Ver todos os pedidos pendentes de producao"
+            >
+              Ver pedidos pendentes ({pendingProductionOrderGroups.length})
+            </button>
           </div>
         </div>
         <div className="table-wrap">
@@ -2457,6 +2478,94 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                           onClick={() => void deleteOrderGroup(group)}
                         >
                           {deletingOrderId === group.primary.id ? "Excluindo..." : "Excluir pedido"}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })
+              )}
+            </div>
+          </article>
+        </div>
+      )}
+
+      {showPendingProductionModal && (
+        <div className="assistant-modal-backdrop" onClick={() => setShowPendingProductionModal(false)}>
+          <article className="assistant-modal ml-packed-orders-modal" onClick={(e) => e.stopPropagation()}>
+            <header className="assistant-modal-head">
+              <h3>Pedidos pendentes para producao</h3>
+              <button type="button" onClick={() => setShowPendingProductionModal(false)}>
+                Fechar
+              </button>
+            </header>
+
+            <p className="page-text">
+              {pendingProductionOrderGroups.length} pedido(s) com item(ns) pendente(s) de producao.
+            </p>
+
+            <div className="ml-packed-orders-list">
+              {pendingProductionOrderGroups.length === 0 ? (
+                <div className="ml-packed-order-card">
+                  <p className="page-text">Nenhum pedido pendente para producao na data selecionada.</p>
+                </div>
+              ) : (
+                pendingProductionOrderGroups.map(({ group, pendingRows, pendingQty }) => {
+                  const row = group.primary;
+                  return (
+                    <article key={`pending-production-${group.key}`} className="ml-packed-order-card">
+                      <div className="ml-packed-order-main">
+                        <p><strong>Pedido:</strong> {row.platform_order_number || "-"}</p>
+                        <p><strong>Rastreio:</strong> {row.tracking_number || "-"}</p>
+                        <p><strong>Destinatario:</strong> {row.recipient_name || "-"}</p>
+                        <p><strong>Itens pendentes:</strong> {pendingRows.length}</p>
+                        <p><strong>Quantidade pendente:</strong> {pendingQty}</p>
+                        <p><strong>Data envio:</strong> {formatDateOnly(shippingDateFromRaw(row.row_raw))}</p>
+                      </div>
+
+                      <div className="table-wrap">
+                        <table className="table clean ml-shipping-table">
+                          <thead>
+                            <tr>
+                              <th>Foto</th>
+                              <th>Anuncio</th>
+                              <th>SKU</th>
+                              <th>Qtd</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pendingRows.map((item, idx) => {
+                              const imageUrl = String(item.image_url || safeRawValue(item.row_raw, "image_url") || "")
+                                .replace(/^http:\/\//i, "https://")
+                                .trim();
+                              return (
+                                <tr key={item.id}>
+                                  <td data-label="Foto">
+                                    {imageUrl ? (
+                                      <img
+                                        src={imageUrl}
+                                        alt={`Item ${idx + 1} ${safeRawValue(item.row_raw, "sku") || ""}`}
+                                        className="ml-thumb"
+                                        loading="lazy"
+                                      />
+                                    ) : (
+                                      <span className="ml-thumb-fallback">📦</span>
+                                    )}
+                                  </td>
+                                  <td data-label="Anuncio">{item.ad_name || "-"}</td>
+                                  <td data-label="SKU">{safeRawValue(item.row_raw, "sku") || "-"}</td>
+                                  <td data-label="Qtd">{item.product_qty || 1}</td>
+                                  <td data-label="Status">{isProductionSeparated(item) ? "Separado" : "Pendente"}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="ml-packed-order-actions">
+                        <button type="button" className="ghost-btn" onClick={() => setSelectedOrder(row)}>
+                          Ver detalhes
                         </button>
                       </div>
                     </article>
