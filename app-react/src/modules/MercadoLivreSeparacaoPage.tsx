@@ -1374,14 +1374,41 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
 
   const pendingProductionOrderGroups = useMemo(
     () =>
-      groupedOrdersBySelectedDate
+      [...(() => {
+        const grouped = new Map<string, ShippingOrderGroup>();
+        for (const row of savedOrders) {
+          const key = orderGroupKey(row);
+          const current = grouped.get(key);
+          if (!current) {
+            grouped.set(key, {
+              key,
+              rows: [row],
+              primary: row,
+              itemsCount: 1,
+              totalQty: Math.max(1, Number(row.product_qty) || 1),
+              packedCount: isOrderPacked(row) ? 1 : 0,
+              fullyPacked: isOrderPacked(row)
+            });
+            continue;
+          }
+          current.rows.push(row);
+          current.itemsCount += 1;
+          current.totalQty += Math.max(1, Number(row.product_qty) || 1);
+          if (isOrderPacked(row)) current.packedCount += 1;
+          current.fullyPacked = current.packedCount >= current.itemsCount;
+          if (new Date(row.updated_at).getTime() > new Date(current.primary.updated_at).getTime()) {
+            current.primary = row;
+          }
+        }
+        return grouped.values();
+      })()]
         .map((group) => {
           const pendingRows = group.rows.filter((row) => !isOrderPacked(row) && !isProductionSeparated(row));
           const pendingQty = pendingRows.reduce((acc, row) => acc + Math.max(1, Number(row.product_qty) || 1), 0);
           return { group, pendingRows, pendingQty };
         })
         .filter((entry) => entry.pendingRows.length > 0),
-    [groupedOrdersBySelectedDate]
+    [savedOrders]
   );
 
   const previewRowsBySelectedDate = useMemo(() => {
@@ -2500,7 +2527,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             </header>
 
             <p className="page-text">
-              {pendingProductionOrderGroups.length} pedido(s) com item(ns) pendente(s) de producao.
+              {pendingProductionOrderGroups.length} pedido(s) com item(ns) pendente(s) de producao em todas as datas.
             </p>
 
             <div className="ml-packed-orders-list">
