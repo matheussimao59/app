@@ -48,6 +48,16 @@ type ShippingOrder = {
   updated_at: string;
 };
 
+type ShippingOrderGroup = {
+  key: string;
+  rows: ShippingOrder[];
+  primary: ShippingOrder;
+  itemsCount: number;
+  totalQty: number;
+  packedCount: number;
+  fullyPacked: boolean;
+};
+
 function isOrderPacked(row: ShippingOrder | null | undefined) {
   const packed = row?.row_raw && typeof row.row_raw === "object" ? row.row_raw.packed : null;
   return packed === true;
@@ -72,6 +82,14 @@ function normalizeTracking(text?: string) {
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "")
     .trim();
+}
+
+function orderGroupKey(row: ShippingOrder) {
+  const byOrder = normalizeText(row.platform_order_number || "");
+  if (byOrder) return `order:${byOrder}`;
+  const byTracking = normalizeTracking(row.tracking_number || "");
+  if (byTracking) return `tracking:${byTracking}`;
+  return `id:${row.id}`;
 }
 
 function valueAsNumber(value: unknown) {
@@ -721,6 +739,50 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
     }
   }
 
+  async function deleteOrderGroup(group: ShippingOrderGroup) {
+    if (!supabase || !userId) return;
+    if (!group.rows.length) return;
+
+    const orderLabel = group.primary.platform_order_number || group.primary.tracking_number || group.primary.id;
+    const shouldDelete = window.confirm(
+      `Excluir o pedido ${orderLabel} com ${group.itemsCount} item(ns) salvo(s) no sistema?`
+    );
+    if (!shouldDelete) return;
+
+    setDeletingOrderId(group.primary.id);
+    setError(null);
+    setStatus(null);
+
+    try {
+      const ids = group.rows.map((row) => row.id);
+      const chunkSize = 400;
+      let removedTotal = 0;
+
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        const { data, error: removeError } = await supabase
+          .from("ml_shipping_orders")
+          .delete()
+          .eq("user_id", userId)
+          .in("id", chunk)
+          .select("id");
+
+        if (removeError) throw new Error(removeError.message);
+        removedTotal += Array.isArray(data) ? data.length : 0;
+      }
+
+      const idSet = new Set(ids);
+      setSavedOrders((prev) => prev.filter((row) => !idSet.has(row.id)));
+      if (selectedOrder && idSet.has(selectedOrder.id)) setSelectedOrder(null);
+      setStatus(`Pedido removido com sucesso (${removedTotal} item(ns) excluido(s)).`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Falha ao excluir pedido agrupado.";
+      setError(`Nao foi possivel excluir: ${message}`);
+    } finally {
+      setDeletingOrderId(null);
+    }
+  }
+
   async function deleteFilteredOrders() {
     if (!supabase || !userId) return;
     if (!filteredByTracking.length) {
@@ -952,6 +1014,95 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
     }
   }
 
+  async function markOrderGroupAsPacked(group: ShippingOrderGroup) {
+    if (!supabase || !userId) return;
+    const targets = group.rows.filter((row) => !isOrderPacked(row));
+    if (!targets.length) {
+      setStatus("Este pedido ja esta marcado como embalado.");
+      return;
+    }
+
+    setPackingOrderId(group.primary.id);
+    setError(null);
+    setStatus(null);
+
+    try {
+      const nowIso = new Date().toISOString();
+      const updatedRows = new Map<string, ShippingOrder>();
+
+      for (const row of targets) {
+        const nextRaw = { ...(row.row_raw || {}), packed: true, packed_at: nowIso };
+        const { error: updateError, data } = await supabase
+          .from("ml_shipping_orders")
+          .update({ row_raw: nextRaw, updated_at: nowIso })
+          .eq("user_id", userId)
+          .eq("id", row.id)
+          .select("*")
+          .single();
+
+        if (updateError) throw new Error(updateError.message);
+        updatedRows.set(row.id, (data || { ...row, row_raw: nextRaw, updated_at: nowIso }) as ShippingOrder);
+      }
+
+      setSavedOrders((prev) => prev.map((item) => updatedRows.get(item.id) || item));
+      if (selectedOrder && updatedRows.has(selectedOrder.id)) {
+        setSelectedOrder(updatedRows.get(selectedOrder.id) || selectedOrder);
+      }
+      setStatus(`Pedido marcado como embalado (${updatedRows.size} item(ns)).`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Falha ao marcar pedido como embalado.";
+      setError(`Nao foi possivel marcar como embalado: ${message}`);
+    } finally {
+      setPackingOrderId(null);
+    }
+  }
+
+  async function cancelOrderGroupPacking(group: ShippingOrderGroup) {
+    if (!supabase || !userId) return;
+    const targets = group.rows.filter((row) => isOrderPacked(row));
+    if (!targets.length) {
+      setStatus("Este pedido ainda nao esta embalado.");
+      return;
+    }
+
+    setUnpackingOrderId(group.primary.id);
+    setError(null);
+    setStatus(null);
+
+    try {
+      const nowIso = new Date().toISOString();
+      const updatedRows = new Map<string, ShippingOrder>();
+
+      for (const row of targets) {
+        const nextRaw = { ...(row.row_raw || {}) };
+        delete nextRaw.packed;
+        delete nextRaw.packed_at;
+
+        const { error: updateError, data } = await supabase
+          .from("ml_shipping_orders")
+          .update({ row_raw: nextRaw, updated_at: nowIso })
+          .eq("user_id", userId)
+          .eq("id", row.id)
+          .select("*")
+          .single();
+
+        if (updateError) throw new Error(updateError.message);
+        updatedRows.set(row.id, (data || { ...row, row_raw: nextRaw, updated_at: nowIso }) as ShippingOrder);
+      }
+
+      setSavedOrders((prev) => prev.map((item) => updatedRows.get(item.id) || item));
+      if (selectedOrder && updatedRows.has(selectedOrder.id)) {
+        setSelectedOrder(updatedRows.get(selectedOrder.id) || selectedOrder);
+      }
+      setStatus(`Embalagem cancelada com sucesso (${updatedRows.size} item(ns)).`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Falha ao cancelar embalagem.";
+      setError(`Nao foi possivel cancelar embalagem: ${message}`);
+    } finally {
+      setUnpackingOrderId(null);
+    }
+  }
+
   const ordersBySelectedDate = useMemo(
     () =>
       shippingDateFilter
@@ -969,6 +1120,61 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
     const sorted = [...byTracking].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
     return key ? sorted.slice(0, 300) : sorted.slice(0, 200);
   }, [ordersBySelectedDate, trackingSearch]);
+
+  const groupedOrdersBySelectedDate = useMemo(() => {
+    const grouped = new Map<string, ShippingOrderGroup>();
+    for (const row of ordersBySelectedDate) {
+      const key = orderGroupKey(row);
+      const current = grouped.get(key);
+      if (!current) {
+        grouped.set(key, {
+          key,
+          rows: [row],
+          primary: row,
+          itemsCount: 1,
+          totalQty: Math.max(1, Number(row.product_qty) || 1),
+          packedCount: isOrderPacked(row) ? 1 : 0,
+          fullyPacked: isOrderPacked(row)
+        });
+        continue;
+      }
+      current.rows.push(row);
+      current.itemsCount += 1;
+      current.totalQty += Math.max(1, Number(row.product_qty) || 1);
+      if (isOrderPacked(row)) current.packedCount += 1;
+      current.fullyPacked = current.packedCount >= current.itemsCount;
+      if (new Date(row.updated_at).getTime() > new Date(current.primary.updated_at).getTime()) {
+        current.primary = row;
+      }
+    }
+    return [...grouped.values()].sort(
+      (a, b) => new Date(b.primary.updated_at).getTime() - new Date(a.primary.updated_at).getTime()
+    );
+  }, [ordersBySelectedDate]);
+
+  const groupedFilteredByTracking = useMemo(() => {
+    const key = normalizeTracking(trackingSearch);
+    if (!key) return groupedOrdersBySelectedDate;
+    return groupedOrdersBySelectedDate.filter((group) =>
+      group.rows.some((row) => normalizeTracking(row.tracking_number || "").includes(key))
+    );
+  }, [groupedOrdersBySelectedDate, trackingSearch]);
+
+  const selectedOrderGroup = useMemo(() => {
+    if (!selectedOrder) return [] as ShippingOrder[];
+
+    const orderNumberKey = normalizeText(selectedOrder.platform_order_number || "");
+    if (orderNumberKey) {
+      return savedOrders.filter((row) => normalizeText(row.platform_order_number || "") === orderNumberKey);
+    }
+
+    const trackingKey = normalizeTracking(selectedOrder.tracking_number || "");
+    if (trackingKey) {
+      return savedOrders.filter((row) => normalizeTracking(row.tracking_number || "") === trackingKey);
+    }
+
+    return [selectedOrder];
+  }, [selectedOrder, savedOrders]);
 
   function openByTrackingValue(rawValue: string, options?: { closeCameraOnFound?: boolean }) {
     const normalized = normalizeTracking(rawValue);
@@ -991,7 +1197,18 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
       return;
     }
 
-    setScanStatus(`Pedido encontrado: ${target.platform_order_number || "-"}`);
+    const orderNumberKey = normalizeText(target.platform_order_number || "");
+    const groupCount = orderNumberKey
+      ? ordersBySelectedDate.filter((row) => normalizeText(row.platform_order_number || "") === orderNumberKey).length
+      : ordersBySelectedDate.filter(
+          (row) => normalizeTracking(row.tracking_number || "") === normalizeTracking(target.tracking_number || "")
+        ).length;
+
+    setScanStatus(
+      groupCount > 1
+        ? `Pedido encontrado: ${target.platform_order_number || "-"} (${groupCount} itens no mesmo pedido)`
+        : `Pedido encontrado: ${target.platform_order_number || "-"}`
+    );
     setSelectedOrder(target);
     if (options?.closeCameraOnFound) {
       setWebCameraEnabled(false);
@@ -1127,37 +1344,31 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
 
   const stats = useMemo(() => {
     const uniqueTrackings = new Set(
-      ordersBySelectedDate
-        .map((row) => normalizeTracking(row.tracking_number || ""))
+      groupedOrdersBySelectedDate
+        .map((group) => normalizeTracking(group.primary.tracking_number || ""))
         .filter(Boolean)
     );
 
     const totalQty = ordersBySelectedDate.reduce((acc, row) => acc + (Number(row.product_qty) || 0), 0);
-    const packedOrders = ordersBySelectedDate.reduce((acc, row) => acc + (isOrderPacked(row) ? 1 : 0), 0);
+    const packedOrders = groupedOrdersBySelectedDate.reduce((acc, group) => acc + (group.fullyPacked ? 1 : 0), 0);
 
     return {
-      totalOrders: ordersBySelectedDate.length,
+      totalOrders: groupedOrdersBySelectedDate.length,
       totalTrackings: uniqueTrackings.size,
       totalQty,
       packedOrders,
-      unpackedOrders: Math.max(0, ordersBySelectedDate.length - packedOrders)
+      unpackedOrders: Math.max(0, groupedOrdersBySelectedDate.length - packedOrders)
     };
-  }, [ordersBySelectedDate]);
+  }, [ordersBySelectedDate, groupedOrdersBySelectedDate]);
 
-  const packedOrders = useMemo(
-    () =>
-      ordersBySelectedDate
-        .filter((row) => isOrderPacked(row))
-        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
-    [ordersBySelectedDate]
+  const packedOrderGroups = useMemo(
+    () => groupedOrdersBySelectedDate.filter((group) => group.fullyPacked),
+    [groupedOrdersBySelectedDate]
   );
 
-  const unpackedOrders = useMemo(
-    () =>
-      ordersBySelectedDate
-        .filter((row) => !isOrderPacked(row))
-        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
-    [ordersBySelectedDate]
+  const unpackedOrderGroups = useMemo(
+    () => groupedOrdersBySelectedDate.filter((group) => !group.fullyPacked),
+    [groupedOrdersBySelectedDate]
   );
 
   const previewRowsBySelectedDate = useMemo(() => {
@@ -1207,6 +1418,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             sku: row.sku,
             imageUrl: row.imageUrl,
             productQty: Math.max(1, Number(row.productQty) || 1),
+            orderKey: row.platformOrderNumber || row.rowId,
             orderId: "",
             productionSeparated: false
           }))
@@ -1217,6 +1429,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
               sku: safeRawValue(row.row_raw, "sku"),
               imageUrl: row.image_url || safeRawValue(row.row_raw, "image_url"),
               productQty: Math.max(1, Number(row.product_qty) || 1),
+              orderKey: row.platform_order_number || row.id,
               orderId: row.id,
               productionSeparated: isProductionSeparated(row)
             }));
@@ -1231,9 +1444,9 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
         unitsPerAd: number;
         cartQty: number;
         totalProduce: number;
-        ordersCount: number;
-        separatedOrders: number;
         orderIds: string[];
+        orderKeys: Set<string>;
+        separatedOrderKeys: Set<string>;
       }
     >();
 
@@ -1251,21 +1464,34 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
         unitsPerAd,
         cartQty: 0,
         totalProduce: 0,
-        ordersCount: 0,
-        separatedOrders: 0,
-        orderIds: []
+        orderIds: [],
+        orderKeys: new Set<string>(),
+        separatedOrderKeys: new Set<string>()
       };
 
       current.cartQty += Math.max(1, Number(row.productQty) || 1);
       current.totalProduce += Math.max(1, Number(row.productQty) || 1) * unitsPerAd;
-      current.ordersCount += 1;
-      if (row.productionSeparated) current.separatedOrders += 1;
+      if (row.orderKey) current.orderKeys.add(row.orderKey);
+      if (row.productionSeparated && row.orderKey) current.separatedOrderKeys.add(row.orderKey);
       if (row.orderId) current.orderIds.push(row.orderId);
       if (!current.imageUrl && row.imageUrl) current.imageUrl = row.imageUrl;
       grouped.set(key, current);
     }
 
-    return [...grouped.values()].sort((a, b) => b.totalProduce - a.totalProduce);
+    return [...grouped.values()]
+      .map((row) => ({
+        key: row.key,
+        info: row.info,
+        sku: row.sku,
+        imageUrl: row.imageUrl,
+        unitsPerAd: row.unitsPerAd,
+        cartQty: row.cartQty,
+        totalProduce: row.totalProduce,
+        ordersCount: row.orderKeys.size,
+        separatedOrders: row.separatedOrderKeys.size,
+        orderIds: row.orderIds
+      }))
+      .sort((a, b) => b.totalProduce - a.totalProduce);
   }, [previewRows, previewRowsBySelectedDate, ordersBySelectedDate]);
   const productionPendingRows = useMemo(
     () => productionRows.filter((row) => row.separatedOrders < row.ordersCount),
@@ -1760,7 +1986,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
       {showTrackingList && <div className="ml-orders-table-wrap">
         <div className="ml-orders-head">
           <h3>Pedidos por rastreio</h3>
-          <span>{filteredByTracking.length} resultado(s)</span>
+          <span>{groupedFilteredByTracking.length} pedido(s)</span>
         </div>
 
         <div className="table-wrap">
@@ -1783,22 +2009,24 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                 <tr>
                   <td colSpan={9}>Carregando pedidos...</td>
                 </tr>
-              ) : filteredByTracking.length === 0 ? (
+              ) : groupedFilteredByTracking.length === 0 ? (
                 <tr>
                   <td colSpan={9}>{noResultMessage}</td>
                 </tr>
               ) : (
-                filteredByTracking.slice(0, 200).map((row) => (
-                  <tr key={row.id}>
-                    <td className="ml-col-order-id" data-label="Rastreio">{row.tracking_number || "-"}</td>
-                    <td className="ml-col-order-id" data-label="Pedido">{row.platform_order_number || "-"}</td>
-                    <td data-label="Destinatario">{row.recipient_name || "-"}</td>
-                    <td className="ml-col-title" data-label="Anuncio">{row.ad_name || "-"}</td>
-                    <td data-label="Qtd">{row.product_qty || 1}</td>
-                    <td data-label="Data envio">{formatDateOnly(shippingDateFromRaw(row.row_raw))}</td>
-                    <td data-label="Atualizado">{formatDate(row.updated_at)}</td>
+                groupedFilteredByTracking.slice(0, 200).map((group) => (
+                  <tr key={group.key}>
+                    <td className="ml-col-order-id" data-label="Rastreio">{group.primary.tracking_number || "-"}</td>
+                    <td className="ml-col-order-id" data-label="Pedido">{group.primary.platform_order_number || "-"}</td>
+                    <td data-label="Destinatario">{group.primary.recipient_name || "-"}</td>
+                    <td className="ml-col-title" data-label="Anuncio">
+                      {group.itemsCount > 1 ? `Grupo (${group.itemsCount} itens)` : group.primary.ad_name || "-"}
+                    </td>
+                    <td data-label="Qtd">{group.totalQty}</td>
+                    <td data-label="Data envio">{formatDateOnly(shippingDateFromRaw(group.primary.row_raw))}</td>
+                    <td data-label="Atualizado">{formatDate(group.primary.updated_at)}</td>
                     <td data-label="Detalhes">
-                      <button type="button" className="ghost-btn" onClick={() => setSelectedOrder(row)}>
+                      <button type="button" className="ghost-btn" onClick={() => setSelectedOrder(group.primary)}>
                         Visualizar
                       </button>
                     </td>
@@ -1806,10 +2034,10 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                       <button
                         type="button"
                         className="danger-btn"
-                        onClick={() => void deleteSavedOrder(row)}
-                        disabled={deletingOrderId === row.id}
+                        onClick={() => void deleteOrderGroup(group)}
+                        disabled={deletingOrderId === group.primary.id}
                       >
-                        {deletingOrderId === row.id ? "Excluindo..." : "Excluir"}
+                        {deletingOrderId === group.primary.id ? "Excluindo..." : "Excluir"}
                       </button>
                     </td>
                   </tr>
@@ -1934,6 +2162,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
 
               <div className="ml-shipping-detail-list">
                 <p><strong>Pedido:</strong> {selectedOrder.platform_order_number || "-"}</p>
+                <p><strong>Itens no pedido:</strong> {selectedOrderGroup.length}</p>
                 <p><strong>Rastreio:</strong> {selectedOrder.tracking_number || "-"}</p>
                 <p><strong>Destinatario:</strong> {selectedOrder.recipient_name || "-"}</p>
                 <p><strong>Anuncio:</strong> {selectedOrder.ad_name || "-"}</p>
@@ -1963,6 +2192,55 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                 )}
               </div>
             </div>
+
+            {selectedOrderGroup.length > 1 && (
+              <div className="ml-orders-table-wrap" style={{ marginTop: 10 }}>
+                <div className="ml-orders-head">
+                  <h3>Grupo de itens do mesmo pedido</h3>
+                  <span>{selectedOrderGroup.length} item(ns)</span>
+                </div>
+                <div className="table-wrap">
+                  <table className="table clean ml-shipping-table">
+                    <thead>
+                      <tr>
+                        <th>Foto</th>
+                        <th>Anuncio</th>
+                        <th>SKU</th>
+                        <th>Qtd</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedOrderGroup.map((row, index) => (
+                        <tr key={row.id}>
+                          <td data-label="Foto">
+                            {(() => {
+                              const imageUrl = String(row.image_url || safeRawValue(row.row_raw, "image_url") || "")
+                                .replace(/^http:\/\//i, "https://")
+                                .trim();
+                              return imageUrl ? (
+                                <img
+                                  src={imageUrl}
+                                  alt={`Item ${index + 1} ${safeRawValue(row.row_raw, "sku") || ""}`}
+                                  className="ml-thumb"
+                                  loading="lazy"
+                                />
+                              ) : (
+                                <span className="ml-thumb-fallback">📦</span>
+                              );
+                            })()}
+                          </td>
+                          <td data-label="Anuncio">{row.ad_name || "-"}</td>
+                          <td data-label="SKU">{safeRawValue(row.row_raw, "sku") || "-"}</td>
+                          <td data-label="Qtd">{row.product_qty || 1}</td>
+                          <td data-label="Status">{isOrderPacked(row) ? "Embalado" : "Pendente"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </article>
         </div>
       )}
@@ -1978,22 +2256,34 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             </header>
 
             <p className="page-text">
-              {packedOrders.length} pedido(s) marcado(s) como embalado(s).
+              {packedOrderGroups.length} pedido(s) marcado(s) como embalado(s).
             </p>
 
             <div className="ml-packed-orders-list">
-              {packedOrders.length === 0 ? (
+              {packedOrderGroups.length === 0 ? (
                 <div className="ml-packed-order-card">
                   <p className="page-text">Nenhum pedido embalado ainda.</p>
                 </div>
               ) : (
-                packedOrders.map((row) => {
+                packedOrderGroups.map((group) => {
+                  const row = group.primary;
                   const packedAtRaw =
                     row.row_raw && typeof row.row_raw === "object"
                       ? (row.row_raw.packed_at as string | undefined)
                       : undefined;
                   const packedAt = packedAtRaw || row.updated_at;
                   const sku = safeRawValue(row.row_raw, "sku");
+                  const groupImages = Array.from(
+                    new Set(
+                      group.rows
+                        .map((item) =>
+                          String(item.image_url || safeRawValue(item.row_raw, "image_url") || "")
+                            .replace(/^http:\/\//i, "https://")
+                            .trim()
+                        )
+                        .filter(Boolean)
+                    )
+                  );
 
                   return (
                     <article key={row.id} className="ml-packed-order-card">
@@ -2010,16 +2300,30 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                         )}
                         <div className="ml-packed-order-main">
                           <p><strong>Pedido:</strong> {row.platform_order_number || "-"}</p>
+                          <p><strong>Grupo:</strong> {group.itemsCount > 1 ? `${group.itemsCount} itens` : "Item unico"}</p>
                           <p><strong>Rastreio:</strong> {row.tracking_number || "-"}</p>
                           <p><strong>Destinatario:</strong> {row.recipient_name || "-"}</p>
-                          <p><strong>Anuncio:</strong> {row.ad_name || "-"}</p>
+                          <p><strong>Anuncio:</strong> {group.itemsCount > 1 ? "Grupo de produtos" : row.ad_name || "-"}</p>
                           <p><strong>Variacao:</strong> {row.variation || "-"}</p>
                           <p><strong>Data envio:</strong> {formatDateOnly(shippingDateFromRaw(row.row_raw))}</p>
                         </div>
                       </div>
+                      {groupImages.length > 1 && (
+                        <div className="ml-packed-order-gallery">
+                          {groupImages.map((imageUrl, idx) => (
+                            <img
+                              key={`${group.key}-img-${idx}`}
+                              src={imageUrl}
+                              alt={`Imagem ${idx + 1} do pedido ${row.platform_order_number || "-"}`}
+                              className="ml-packed-order-gallery-image"
+                              loading="lazy"
+                            />
+                          ))}
+                        </div>
+                      )}
                       <div className="ml-packed-order-grid">
-                        <p><strong>SKU:</strong> {sku || "-"}</p>
-                        <p><strong>Quantidade:</strong> {row.product_qty || 1}</p>
+                        <p><strong>SKU:</strong> {group.itemsCount > 1 ? "Multiplos" : sku || "-"}</p>
+                        <p><strong>Quantidade:</strong> {group.totalQty}</p>
                         <p><strong>Arquivo:</strong> {row.source_file_name || "-"}</p>
                         <p><strong>Embalado em:</strong> {formatDate(packedAt)}</p>
                         <p><strong>Notas:</strong> {row.buyer_notes || "-"}</p>
@@ -2032,18 +2336,18 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                         <button
                           type="button"
                           className="ghost-btn"
-                          disabled={unpackingOrderId === row.id}
-                          onClick={() => void cancelOrderPacking(row)}
+                          disabled={unpackingOrderId === group.primary.id}
+                          onClick={() => void cancelOrderGroupPacking(group)}
                         >
-                          {unpackingOrderId === row.id ? "Cancelando..." : "Cancelar embalagem"}
+                          {unpackingOrderId === group.primary.id ? "Cancelando..." : "Cancelar embalagem"}
                         </button>
                         <button
                           type="button"
                           className="danger-btn"
                           disabled={Boolean(deletingOrderId)}
-                          onClick={() => void deleteSavedOrder(row)}
+                          onClick={() => void deleteOrderGroup(group)}
                         >
-                          {deletingOrderId === row.id ? "Excluindo..." : "Excluir pedido"}
+                          {deletingOrderId === group.primary.id ? "Excluindo..." : "Excluir pedido"}
                         </button>
                       </div>
                     </article>
@@ -2066,17 +2370,29 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             </header>
 
             <p className="page-text">
-              {unpackedOrders.length} pedido(s) pendente(s) de embalagem.
+              {unpackedOrderGroups.length} pedido(s) pendente(s) de embalagem.
             </p>
 
             <div className="ml-packed-orders-list">
-              {unpackedOrders.length === 0 ? (
+              {unpackedOrderGroups.length === 0 ? (
                 <div className="ml-packed-order-card">
                   <p className="page-text">Nenhum pedido pendente de embalagem.</p>
                 </div>
               ) : (
-                unpackedOrders.map((row) => {
+                unpackedOrderGroups.map((group) => {
+                  const row = group.primary;
                   const sku = safeRawValue(row.row_raw, "sku");
+                  const groupImages = Array.from(
+                    new Set(
+                      group.rows
+                        .map((item) =>
+                          String(item.image_url || safeRawValue(item.row_raw, "image_url") || "")
+                            .replace(/^http:\/\//i, "https://")
+                            .trim()
+                        )
+                        .filter(Boolean)
+                    )
+                  );
 
                   return (
                     <article key={row.id} className="ml-packed-order-card">
@@ -2093,16 +2409,30 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                         )}
                         <div className="ml-packed-order-main">
                           <p><strong>Pedido:</strong> {row.platform_order_number || "-"}</p>
+                          <p><strong>Grupo:</strong> {group.itemsCount > 1 ? `${group.itemsCount} itens` : "Item unico"}</p>
                           <p><strong>Rastreio:</strong> {row.tracking_number || "-"}</p>
                           <p><strong>Destinatario:</strong> {row.recipient_name || "-"}</p>
-                          <p><strong>Anuncio:</strong> {row.ad_name || "-"}</p>
+                          <p><strong>Anuncio:</strong> {group.itemsCount > 1 ? "Grupo de produtos" : row.ad_name || "-"}</p>
                           <p><strong>Variacao:</strong> {row.variation || "-"}</p>
                           <p><strong>Data envio:</strong> {formatDateOnly(shippingDateFromRaw(row.row_raw))}</p>
                         </div>
                       </div>
+                      {groupImages.length > 1 && (
+                        <div className="ml-packed-order-gallery">
+                          {groupImages.map((imageUrl, idx) => (
+                            <img
+                              key={`${group.key}-img-${idx}`}
+                              src={imageUrl}
+                              alt={`Imagem ${idx + 1} do pedido ${row.platform_order_number || "-"}`}
+                              className="ml-packed-order-gallery-image"
+                              loading="lazy"
+                            />
+                          ))}
+                        </div>
+                      )}
                       <div className="ml-packed-order-grid">
-                        <p><strong>SKU:</strong> {sku || "-"}</p>
-                        <p><strong>Quantidade:</strong> {row.product_qty || 1}</p>
+                        <p><strong>SKU:</strong> {group.itemsCount > 1 ? "Multiplos" : sku || "-"}</p>
+                        <p><strong>Quantidade:</strong> {group.totalQty}</p>
                         <p><strong>Arquivo:</strong> {row.source_file_name || "-"}</p>
                         <p><strong>Atualizado em:</strong> {formatDate(row.updated_at)}</p>
                         <p><strong>Notas:</strong> {row.buyer_notes || "-"}</p>
@@ -2115,18 +2445,18 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                         <button
                           type="button"
                           className="primary-btn"
-                          disabled={packingOrderId === row.id}
-                          onClick={() => void markOrderAsPacked(row)}
+                          disabled={packingOrderId === group.primary.id}
+                          onClick={() => void markOrderGroupAsPacked(group)}
                         >
-                          {packingOrderId === row.id ? "Salvando..." : "Marcar embalado"}
+                          {packingOrderId === group.primary.id ? "Salvando..." : "Marcar embalado"}
                         </button>
                         <button
                           type="button"
                           className="danger-btn"
                           disabled={Boolean(deletingOrderId)}
-                          onClick={() => void deleteSavedOrder(row)}
+                          onClick={() => void deleteOrderGroup(group)}
                         >
-                          {deletingOrderId === row.id ? "Excluindo..." : "Excluir pedido"}
+                          {deletingOrderId === group.primary.id ? "Excluindo..." : "Excluir pedido"}
                         </button>
                       </div>
                     </article>
