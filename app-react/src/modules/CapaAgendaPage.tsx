@@ -100,7 +100,7 @@ function openPdfForItems(items: CapaAgendaItem[]) {
           }
           .cover-wrap {
             width: 175mm;
-            height: 245mm;
+            height: 235mm;
             border: 0.3mm dashed #cbd5e1;
             display: grid;
             place-items: center;
@@ -433,7 +433,7 @@ export function CapaAgendaPage() {
 
             <form className="capa-upload-form" onSubmit={(e) => void addItem(e)}>
               <div className="capa-upload-tip">
-                <p>Adicione frente e verso no mesmo cadastro. O PDF sai em A4 vertical com capa 17,5 x 24,5 cm.</p>
+                <p>Adicione frente e verso no mesmo cadastro. O PDF sai em A4 vertical com capa 17,5 x 23,5 cm.</p>
               </div>
 
               <label className="field">
