@@ -364,7 +364,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
   const [selectedOrder, setSelectedOrder] = useState<ShippingOrder | null>(null);
   const [showPackedOrdersModal, setShowPackedOrdersModal] = useState(false);
   const [showUnpackedOrdersModal, setShowUnpackedOrdersModal] = useState(false);
-  const [showPendingProductionModal, setShowPendingProductionModal] = useState(false);
+  const [showPendingProductionList, setShowPendingProductionList] = useState(false);
   const [scannerMode, setScannerMode] = useState(false);
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
@@ -1372,44 +1372,78 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
     [groupedOrdersBySelectedDate]
   );
 
-  const pendingProductionOrderGroups = useMemo(
-    () =>
-      [...(() => {
-        const grouped = new Map<string, ShippingOrderGroup>();
-        for (const row of savedOrders) {
-          const key = orderGroupKey(row);
-          const current = grouped.get(key);
-          if (!current) {
-            grouped.set(key, {
-              key,
-              rows: [row],
-              primary: row,
-              itemsCount: 1,
-              totalQty: Math.max(1, Number(row.product_qty) || 1),
-              packedCount: isOrderPacked(row) ? 1 : 0,
-              fullyPacked: isOrderPacked(row)
-            });
-            continue;
-          }
-          current.rows.push(row);
-          current.itemsCount += 1;
-          current.totalQty += Math.max(1, Number(row.product_qty) || 1);
-          if (isOrderPacked(row)) current.packedCount += 1;
-          current.fullyPacked = current.packedCount >= current.itemsCount;
-          if (new Date(row.updated_at).getTime() > new Date(current.primary.updated_at).getTime()) {
-            current.primary = row;
-          }
-        }
-        return grouped.values();
-      })()]
-        .map((group) => {
-          const pendingRows = group.rows.filter((row) => !isOrderPacked(row) && !isProductionSeparated(row));
-          const pendingQty = pendingRows.reduce((acc, row) => acc + Math.max(1, Number(row.product_qty) || 1), 0);
-          return { group, pendingRows, pendingQty };
-        })
-        .filter((entry) => entry.pendingRows.length > 0),
-    [savedOrders]
-  );
+  const productionPendingAllDatesRows = useMemo(() => {
+    const source = savedOrders
+      .filter((row) => {
+        if (isOrderPacked(row) || isProductionSeparated(row)) return false;
+        const shippingDate = shippingDateFromRaw(row.row_raw);
+        if (!shippingDate) return false;
+        return shippingDate >= todayYmd;
+      })
+      .map((row) => ({
+        adName: row.ad_name || "",
+        sku: safeRawValue(row.row_raw, "sku"),
+        imageUrl: row.image_url || safeRawValue(row.row_raw, "image_url"),
+        productQty: Math.max(1, Number(row.product_qty) || 1),
+        orderId: row.id,
+        orderKey: row.platform_order_number || row.id
+      }));
+
+    const grouped = new Map<
+      string,
+      {
+        key: string;
+        info: string;
+        sku: string;
+        imageUrl: string;
+        unitsPerAd: number;
+        cartQty: number;
+        totalProduce: number;
+        orderIds: string[];
+        orderKeys: Set<string>;
+      }
+    >();
+
+    for (const row of source) {
+      const unitsPerAd = extractUnitsPerOrderFromTitle(row.adName);
+      const info = cleanAdNameForProduction(row.adName);
+      const sku = row.sku || "-";
+      const key = `${normalizeText(info)}|${normalizeText(sku)}|${unitsPerAd}`;
+
+      const current = grouped.get(key) || {
+        key,
+        info,
+        sku,
+        imageUrl: row.imageUrl || "",
+        unitsPerAd,
+        cartQty: 0,
+        totalProduce: 0,
+        orderIds: [],
+        orderKeys: new Set<string>()
+      };
+
+      current.cartQty += Math.max(1, Number(row.productQty) || 1);
+      current.totalProduce += Math.max(1, Number(row.productQty) || 1) * unitsPerAd;
+      if (row.orderId) current.orderIds.push(row.orderId);
+      if (row.orderKey) current.orderKeys.add(row.orderKey);
+      if (!current.imageUrl && row.imageUrl) current.imageUrl = row.imageUrl;
+      grouped.set(key, current);
+    }
+
+    return [...grouped.values()]
+      .map((row) => ({
+        key: row.key,
+        info: row.info,
+        sku: row.sku,
+        imageUrl: row.imageUrl,
+        unitsPerAd: row.unitsPerAd,
+        cartQty: row.cartQty,
+        totalProduce: row.totalProduce,
+        ordersCount: row.orderKeys.size,
+        orderIds: row.orderIds
+      }))
+      .sort((a, b) => b.totalProduce - a.totalProduce);
+  }, [savedOrders, todayYmd]);
 
   const previewRowsBySelectedDate = useMemo(() => {
     if (!previewRows.length) return [];
@@ -1891,10 +1925,12 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             <button
               type="button"
               className="ghost-btn"
-              onClick={() => setShowPendingProductionModal(true)}
+              onClick={() => setShowPendingProductionList((prev) => !prev)}
               title="Ver todos os pedidos pendentes de producao"
             >
-              Ver pedidos pendentes ({pendingProductionOrderGroups.length})
+              {showPendingProductionList
+                ? "Ocultar pedidos pendentes"
+                : `Ver pedidos pendentes (${productionPendingAllDatesRows.length})`}
             </button>
           </div>
         </div>
@@ -1964,6 +2000,83 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             </tbody>
           </table>
         </div>
+        {showPendingProductionList && (
+          <div className="ml-orders-table-wrap" style={{ marginTop: 10 }}>
+            <div className="ml-orders-head">
+              <h3>Pedidos pendentes para producao</h3>
+              <span>{productionPendingAllDatesRows.length} grupo(s) com data hoje/futura</span>
+            </div>
+            <div className="table-wrap">
+              <table className="table clean ml-shipping-table">
+                <thead>
+                  <tr>
+                    <th>Foto</th>
+                    <th>Informacao</th>
+                    <th>SKU</th>
+                    <th>Und por anuncio</th>
+                    <th>Qtd carrinho</th>
+                    <th>Total produzir</th>
+                    <th>Pedidos</th>
+                    <th>Acao</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productionPendingAllDatesRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={8}>Nenhum pedido pendente para producao.</td>
+                    </tr>
+                  ) : (
+                    productionPendingAllDatesRows.map((row) => (
+                      <tr key={`all-dates-pending-${row.key}`}>
+                        <td data-label="Foto">
+                          {row.imageUrl ? (
+                            <img
+                              className="ml-thumb ml-production-thumb"
+                              src={String(row.imageUrl).replace(/^http:\/\//i, "https://")}
+                              alt={row.info}
+                              loading="lazy"
+                              onError={(e) => {
+                                const img = e.currentTarget;
+                                img.style.display = "none";
+                                const fallback = img.nextElementSibling as HTMLElement | null;
+                                if (fallback) fallback.style.display = "inline-flex";
+                              }}
+                            />
+                          ) : null}
+                          <span
+                            className="ml-thumb-fallback ml-production-thumb-fallback"
+                            style={{ display: row.imageUrl ? "none" : "inline-flex" }}
+                          >
+                            📦
+                          </span>
+                        </td>
+                        <td className="ml-col-title" data-label="Informacao">{row.info}</td>
+                        <td data-label="SKU">{row.sku}</td>
+                        <td data-label="Und por anuncio">{row.unitsPerAd}</td>
+                        <td data-label="Qtd carrinho">{row.cartQty}</td>
+                        <td data-label="Total produzir">
+                          <strong>{row.totalProduce}</strong>
+                        </td>
+                        <td data-label="Pedidos">{row.ordersCount}</td>
+                        <td data-label="Acao">
+                          <button
+                            type="button"
+                            className="primary-btn"
+                            disabled={Boolean(separatingProductionKey) || previewRows.length > 0}
+                            onClick={() => void markProductionGroupAsSeparated(row)}
+                            title={previewRows.length > 0 ? "Salve a lista para marcar separado" : "Marcar como separado"}
+                          >
+                            {separatingProductionKey === row.key ? "Salvando..." : "Marcar separado"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
         <p className="page-text" style={{ marginTop: "0.55rem" }}>
           Regra de quantidade por pedido: quando o titulo comeca com numero (ex.: 35 Lembrancinhas...), esse numero vira
           as unidades por anuncio para calcular o total de producao.
@@ -2516,93 +2629,6 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
         </div>
       )}
 
-      {showPendingProductionModal && (
-        <div className="assistant-modal-backdrop" onClick={() => setShowPendingProductionModal(false)}>
-          <article className="assistant-modal ml-packed-orders-modal" onClick={(e) => e.stopPropagation()}>
-            <header className="assistant-modal-head">
-              <h3>Pedidos pendentes para producao</h3>
-              <button type="button" onClick={() => setShowPendingProductionModal(false)}>
-                Fechar
-              </button>
-            </header>
-
-            <p className="page-text">
-              {pendingProductionOrderGroups.length} pedido(s) com item(ns) pendente(s) de producao em todas as datas.
-            </p>
-
-            <div className="ml-packed-orders-list">
-              {pendingProductionOrderGroups.length === 0 ? (
-                <div className="ml-packed-order-card">
-                  <p className="page-text">Nenhum pedido pendente para producao na data selecionada.</p>
-                </div>
-              ) : (
-                pendingProductionOrderGroups.map(({ group, pendingRows, pendingQty }) => {
-                  const row = group.primary;
-                  return (
-                    <article key={`pending-production-${group.key}`} className="ml-packed-order-card">
-                      <div className="ml-packed-order-main">
-                        <p><strong>Pedido:</strong> {row.platform_order_number || "-"}</p>
-                        <p><strong>Rastreio:</strong> {row.tracking_number || "-"}</p>
-                        <p><strong>Destinatario:</strong> {row.recipient_name || "-"}</p>
-                        <p><strong>Itens pendentes:</strong> {pendingRows.length}</p>
-                        <p><strong>Quantidade pendente:</strong> {pendingQty}</p>
-                        <p><strong>Data envio:</strong> {formatDateOnly(shippingDateFromRaw(row.row_raw))}</p>
-                      </div>
-
-                      <div className="table-wrap">
-                        <table className="table clean ml-shipping-table">
-                          <thead>
-                            <tr>
-                              <th>Foto</th>
-                              <th>Anuncio</th>
-                              <th>SKU</th>
-                              <th>Qtd</th>
-                              <th>Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {pendingRows.map((item, idx) => {
-                              const imageUrl = String(item.image_url || safeRawValue(item.row_raw, "image_url") || "")
-                                .replace(/^http:\/\//i, "https://")
-                                .trim();
-                              return (
-                                <tr key={item.id}>
-                                  <td data-label="Foto">
-                                    {imageUrl ? (
-                                      <img
-                                        src={imageUrl}
-                                        alt={`Item ${idx + 1} ${safeRawValue(item.row_raw, "sku") || ""}`}
-                                        className="ml-thumb"
-                                        loading="lazy"
-                                      />
-                                    ) : (
-                                      <span className="ml-thumb-fallback">📦</span>
-                                    )}
-                                  </td>
-                                  <td data-label="Anuncio">{item.ad_name || "-"}</td>
-                                  <td data-label="SKU">{safeRawValue(item.row_raw, "sku") || "-"}</td>
-                                  <td data-label="Qtd">{item.product_qty || 1}</td>
-                                  <td data-label="Status">{isProductionSeparated(item) ? "Separado" : "Pendente"}</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div className="ml-packed-order-actions">
-                        <button type="button" className="ghost-btn" onClick={() => setSelectedOrder(row)}>
-                          Ver detalhes
-                        </button>
-                      </div>
-                    </article>
-                  );
-                })
-              )}
-            </div>
-          </article>
-        </div>
-      )}
     </section>
   );
 }
