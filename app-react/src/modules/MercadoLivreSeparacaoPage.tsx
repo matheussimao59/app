@@ -1182,26 +1182,22 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
     if (!normalized) return;
 
     const exact =
-      ordersBySelectedDate.find((row) => normalizeTracking(row.tracking_number || "") === normalized) ||
+      savedOrders.find((row) => normalizeTracking(row.tracking_number || "") === normalized) ||
       null;
     const firstContains =
-      ordersBySelectedDate.find((row) => normalizeTracking(row.tracking_number || "").includes(normalized)) ||
+      savedOrders.find((row) => normalizeTracking(row.tracking_number || "").includes(normalized)) ||
       null;
     const target = exact || firstContains;
 
     if (!target) {
-      setScanStatus(
-        shippingDateFilter
-          ? `Rastreio ${normalized} nao encontrado na data ${formatDateOnly(shippingDateFilter)}.`
-          : `Rastreio ${normalized} nao encontrado.`
-      );
+      setScanStatus(`Rastreio ${normalized} nao encontrado.`);
       return;
     }
 
     const orderNumberKey = normalizeText(target.platform_order_number || "");
     const groupCount = orderNumberKey
-      ? ordersBySelectedDate.filter((row) => normalizeText(row.platform_order_number || "") === orderNumberKey).length
-      : ordersBySelectedDate.filter(
+      ? savedOrders.filter((row) => normalizeText(row.platform_order_number || "") === orderNumberKey).length
+      : savedOrders.filter(
           (row) => normalizeTracking(row.tracking_number || "") === normalizeTracking(target.tracking_number || "")
         ).length;
 
