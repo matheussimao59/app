@@ -85,10 +85,10 @@ function normalizeTracking(text?: string) {
 }
 
 function orderGroupKey(row: ShippingOrder) {
-  const byOrder = normalizeText(row.platform_order_number || "");
-  if (byOrder) return `order:${byOrder}`;
   const byTracking = normalizeTracking(row.tracking_number || "");
   if (byTracking) return `tracking:${byTracking}`;
+  const byOrder = normalizeText(row.platform_order_number || "");
+  if (byOrder) return `order:${byOrder}`;
   return `id:${row.id}`;
 }
 
@@ -1164,14 +1164,14 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
   const selectedOrderGroup = useMemo(() => {
     if (!selectedOrder) return [] as ShippingOrder[];
 
-    const orderNumberKey = normalizeText(selectedOrder.platform_order_number || "");
-    if (orderNumberKey) {
-      return savedOrders.filter((row) => normalizeText(row.platform_order_number || "") === orderNumberKey);
-    }
-
     const trackingKey = normalizeTracking(selectedOrder.tracking_number || "");
     if (trackingKey) {
       return savedOrders.filter((row) => normalizeTracking(row.tracking_number || "") === trackingKey);
+    }
+
+    const orderNumberKey = normalizeText(selectedOrder.platform_order_number || "");
+    if (orderNumberKey) {
+      return savedOrders.filter((row) => normalizeText(row.platform_order_number || "") === orderNumberKey);
     }
 
     return [selectedOrder];
@@ -1194,12 +1194,14 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
       return;
     }
 
-    const orderNumberKey = normalizeText(target.platform_order_number || "");
-    const groupCount = orderNumberKey
-      ? savedOrders.filter((row) => normalizeText(row.platform_order_number || "") === orderNumberKey).length
-      : savedOrders.filter(
-          (row) => normalizeTracking(row.tracking_number || "") === normalizeTracking(target.tracking_number || "")
-        ).length;
+    const trackingKey = normalizeTracking(target.tracking_number || "");
+    const groupCount = trackingKey
+      ? savedOrders.filter((row) => normalizeTracking(row.tracking_number || "") === trackingKey).length
+      : (() => {
+          const orderNumberKey = normalizeText(target.platform_order_number || "");
+          if (!orderNumberKey) return 1;
+          return savedOrders.filter((row) => normalizeText(row.platform_order_number || "") === orderNumberKey).length;
+        })();
 
     setScanStatus(
       groupCount > 1
