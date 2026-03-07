@@ -1632,7 +1632,9 @@ body {
 }
 
 .ml-shipping-modal {
-  width: min(980px, 96vw);
+  width: min(1080px, 97vw);
+  max-height: calc(100vh - 24px);
+  overflow: auto;
 }
 
 .ml-shipping-modal-grid {
@@ -1689,6 +1691,56 @@ body {
 .ml-shipping-detail-list .ghost-btn {
   width: fit-content;
   margin-top: 6px;
+}
+
+.ml-order-items-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ml-order-item-card {
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 108px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.ml-order-item-image {
+  width: 108px;
+  height: 108px;
+  border-radius: 8px;
+  border: 1px solid #dbe3ef;
+  object-fit: cover;
+  background: #f8fafc;
+}
+
+.ml-order-item-image.empty {
+  display: grid;
+  place-items: center;
+  color: #64748b;
+}
+
+.ml-order-item-content {
+  display: grid;
+  gap: 3px;
+  align-content: start;
+}
+
+.ml-order-item-content p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.2;
+}
+
+.ml-order-item-title {
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 2px;
 }
 
 .ml-packed-orders-modal {
@@ -2062,6 +2114,26 @@ body {
     width: 100%;
     min-height: 34px;
     margin-top: 4px;
+  }
+
+  .ml-order-items-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .ml-order-item-card {
+    grid-template-columns: 86px 1fr;
+    gap: 8px;
+    padding: 7px;
+  }
+
+  .ml-order-item-image {
+    width: 86px;
+    height: 86px;
+  }
+
+  .ml-order-item-content p {
+    font-size: 0.74rem;
   }
 
   .ml-packed-order-top {

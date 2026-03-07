@@ -2357,47 +2357,35 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                 <h3>Grupo de itens do pedido</h3>
                 <span>{selectedOrderGroup.length} item(ns)</span>
               </div>
-              <div className="table-wrap">
-                <table className="table clean ml-shipping-table">
-                  <thead>
-                    <tr>
-                      <th>Foto</th>
-                      <th>Anuncio</th>
-                      <th>SKU</th>
-                      <th>Variacao</th>
-                      <th>Qtd</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedOrderGroup.map((row, index) => (
-                      <tr key={row.id}>
-                        <td data-label="Foto">
-                          {(() => {
-                            const imageUrl = String(row.image_url || safeRawValue(row.row_raw, "image_url") || "")
-                              .replace(/^http:\/\//i, "https://")
-                              .trim();
-                            return imageUrl ? (
-                              <img
-                                src={imageUrl}
-                                alt={`Item ${index + 1} ${safeRawValue(row.row_raw, "sku") || ""}`}
-                                className="ml-thumb"
-                                loading="lazy"
-                              />
-                            ) : (
-                              <span className="ml-thumb-fallback">📦</span>
-                            );
-                          })()}
-                        </td>
-                        <td data-label="Anuncio">{row.ad_name || "-"}</td>
-                        <td data-label="SKU">{safeRawValue(row.row_raw, "sku") || "-"}</td>
-                        <td data-label="Variacao">{row.variation || "-"}</td>
-                        <td data-label="Qtd">{row.product_qty || 1}</td>
-                        <td data-label="Status">{isOrderPacked(row) ? "Embalado" : "Pendente"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="ml-order-items-grid">
+                {selectedOrderGroup.map((row, index) => {
+                  const imageUrl = String(row.image_url || safeRawValue(row.row_raw, "image_url") || "")
+                    .replace(/^http:\/\//i, "https://")
+                    .trim();
+                  return (
+                    <article key={row.id} className="ml-order-item-card">
+                      <div className="ml-order-item-media">
+                        {imageUrl ? (
+                          <img
+                            src={imageUrl}
+                            alt={`Item ${index + 1} ${safeRawValue(row.row_raw, "sku") || ""}`}
+                            className="ml-order-item-image"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <span className="ml-order-item-image empty">📦</span>
+                        )}
+                      </div>
+                      <div className="ml-order-item-content">
+                        <p className="ml-order-item-title">{row.ad_name || "-"}</p>
+                        <p><strong>SKU:</strong> {safeRawValue(row.row_raw, "sku") || "-"}</p>
+                        <p><strong>Variacao:</strong> {row.variation || "-"}</p>
+                        <p><strong>Qtd:</strong> {row.product_qty || 1}</p>
+                        <p><strong>Status:</strong> {isOrderPacked(row) ? "Embalado" : "Pendente"}</p>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             </div>
           </article>
