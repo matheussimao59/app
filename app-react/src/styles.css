@@ -1669,6 +1669,22 @@ body {
   line-height: 1.38;
 }
 
+.ml-detail-priority {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.ml-detail-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #1d4ed8;
+}
+
 .ml-shipping-detail-list .primary-btn,
 .ml-shipping-detail-list .ghost-btn {
   width: fit-content;

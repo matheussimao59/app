@@ -1176,6 +1176,20 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
 
     return [selectedOrder];
   }, [selectedOrder, savedOrders]);
+  const selectedOrderGroupMeta = useMemo(() => {
+    if (!selectedOrder || !selectedOrderGroup.length) return null;
+    const packedCount = selectedOrderGroup.reduce((acc, row) => acc + (isOrderPacked(row) ? 1 : 0), 0);
+    const totalQty = selectedOrderGroup.reduce((acc, row) => acc + Math.max(1, Number(row.product_qty) || 1), 0);
+    return {
+      key: orderGroupKey(selectedOrder),
+      rows: selectedOrderGroup,
+      primary: selectedOrder,
+      itemsCount: selectedOrderGroup.length,
+      totalQty,
+      packedCount,
+      fullyPacked: packedCount >= selectedOrderGroup.length
+    } as ShippingOrderGroup;
+  }, [selectedOrder, selectedOrderGroup]);
 
   function openByTrackingValue(rawValue: string, options?: { closeCameraOnFound?: boolean }) {
     const normalized = normalizeTracking(rawValue);
@@ -2306,100 +2320,86 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
               </button>
             </header>
 
-            <div className="ml-shipping-modal-grid">
-              <div>
-                {selectedOrder.image_url ? (
-                  <img
-                    src={selectedOrder.image_url}
-                    alt={selectedOrder.ad_name || "Imagem do pedido"}
-                    className="ml-shipping-image"
-                  />
-                ) : (
-                  <div className="ml-shipping-image empty">Sem imagem</div>
-                )}
-              </div>
-
-              <div className="ml-shipping-detail-list">
-                <p><strong>Pedido:</strong> {selectedOrder.platform_order_number || "-"}</p>
-                <p><strong>Itens no pedido:</strong> {selectedOrderGroup.length}</p>
-                <p><strong>Rastreio:</strong> {selectedOrder.tracking_number || "-"}</p>
-                <p><strong>Destinatario:</strong> {selectedOrder.recipient_name || "-"}</p>
-                <p><strong>Anuncio:</strong> {selectedOrder.ad_name || "-"}</p>
-                <p><strong>Variacao:</strong> {selectedOrder.variation || "-"}</p>
-                <p><strong>Quantidade:</strong> {selectedOrder.product_qty || 1}</p>
-                <p><strong>Data de envio:</strong> {formatDateOnly(shippingDateFromRaw(selectedOrder.row_raw))}</p>
-                <p><strong>Status:</strong> {isOrderPacked(selectedOrder) ? "Embalado" : "Pendente"}</p>
-                <p><strong>Notas do comprador:</strong> {selectedOrder.buyer_notes || "-"}</p>
-                <p><strong>Observacoes:</strong> {selectedOrder.observations || "-"}</p>
-                <button
-                  type="button"
-                  className={isOrderPacked(selectedOrder) ? "ghost-btn" : "primary-btn"}
-                  disabled={isOrderPacked(selectedOrder) || packingOrderId === selectedOrder.id}
-                  onClick={() => void markOrderAsPacked(selectedOrder)}
-                >
-                  {packingOrderId === selectedOrder.id ? "Salvando..." : "Pedido Embalado"}
-                </button>
-                {isOrderPacked(selectedOrder) && (
+            <div className="ml-shipping-detail-list">
+              <p className="ml-detail-priority"><strong>Pedido:</strong> <span className="ml-detail-badge">{selectedOrder.platform_order_number || "-"}</span></p>
+              <p><strong>Rastreio:</strong> {selectedOrder.tracking_number || "-"}</p>
+              <p className="ml-detail-priority"><strong>Destinatario:</strong> <span className="ml-detail-badge">{selectedOrder.recipient_name || "-"}</span></p>
+              <p><strong>Itens no pedido:</strong> {selectedOrderGroupMeta?.itemsCount || selectedOrderGroup.length}</p>
+              <p className="ml-detail-priority"><strong>Qtd total:</strong> <span className="ml-detail-badge">{selectedOrderGroupMeta?.totalQty || Math.max(1, Number(selectedOrder.product_qty) || 1)}</span></p>
+              <p><strong>Data de envio:</strong> {formatDateOnly(shippingDateFromRaw(selectedOrder.row_raw))}</p>
+              <p><strong>Status:</strong> {selectedOrderGroupMeta?.fullyPacked ? "Embalado" : "Pendente"}</p>
+              {selectedOrderGroupMeta && (
+                <div className="ml-packed-order-actions">
                   <button
                     type="button"
-                    className="ghost-btn"
-                    disabled={unpackingOrderId === selectedOrder.id}
-                    onClick={() => void cancelOrderPacking(selectedOrder)}
+                    className={selectedOrderGroupMeta.fullyPacked ? "ghost-btn" : "primary-btn"}
+                    disabled={selectedOrderGroupMeta.fullyPacked || packingOrderId === selectedOrderGroupMeta.primary.id}
+                    onClick={() => void markOrderGroupAsPacked(selectedOrderGroupMeta)}
                   >
-                    {unpackingOrderId === selectedOrder.id ? "Cancelando..." : "Cancelar embalagem"}
+                    {packingOrderId === selectedOrderGroupMeta.primary.id ? "Salvando..." : "Pedido Embalado"}
                   </button>
-                )}
-              </div>
+                  {selectedOrderGroupMeta.fullyPacked && (
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      disabled={unpackingOrderId === selectedOrderGroupMeta.primary.id}
+                      onClick={() => void cancelOrderGroupPacking(selectedOrderGroupMeta)}
+                    >
+                      {unpackingOrderId === selectedOrderGroupMeta.primary.id ? "Cancelando..." : "Cancelar embalagem"}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
-            {selectedOrderGroup.length > 1 && (
-              <div className="ml-orders-table-wrap" style={{ marginTop: 10 }}>
-                <div className="ml-orders-head">
-                  <h3>Grupo de itens do mesmo pedido</h3>
-                  <span>{selectedOrderGroup.length} item(ns)</span>
-                </div>
-                <div className="table-wrap">
-                  <table className="table clean ml-shipping-table">
-                    <thead>
-                      <tr>
-                        <th>Foto</th>
-                        <th>Anuncio</th>
-                        <th>SKU</th>
-                        <th>Qtd</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedOrderGroup.map((row, index) => (
-                        <tr key={row.id}>
-                          <td data-label="Foto">
-                            {(() => {
-                              const imageUrl = String(row.image_url || safeRawValue(row.row_raw, "image_url") || "")
-                                .replace(/^http:\/\//i, "https://")
-                                .trim();
-                              return imageUrl ? (
-                                <img
-                                  src={imageUrl}
-                                  alt={`Item ${index + 1} ${safeRawValue(row.row_raw, "sku") || ""}`}
-                                  className="ml-thumb"
-                                  loading="lazy"
-                                />
-                              ) : (
-                                <span className="ml-thumb-fallback">📦</span>
-                              );
-                            })()}
-                          </td>
-                          <td data-label="Anuncio">{row.ad_name || "-"}</td>
-                          <td data-label="SKU">{safeRawValue(row.row_raw, "sku") || "-"}</td>
-                          <td data-label="Qtd">{row.product_qty || 1}</td>
-                          <td data-label="Status">{isOrderPacked(row) ? "Embalado" : "Pendente"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+            <div className="ml-orders-table-wrap" style={{ marginTop: 10 }}>
+              <div className="ml-orders-head">
+                <h3>Grupo de itens do pedido</h3>
+                <span>{selectedOrderGroup.length} item(ns)</span>
               </div>
-            )}
+              <div className="table-wrap">
+                <table className="table clean ml-shipping-table">
+                  <thead>
+                    <tr>
+                      <th>Foto</th>
+                      <th>Anuncio</th>
+                      <th>SKU</th>
+                      <th>Variacao</th>
+                      <th>Qtd</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedOrderGroup.map((row, index) => (
+                      <tr key={row.id}>
+                        <td data-label="Foto">
+                          {(() => {
+                            const imageUrl = String(row.image_url || safeRawValue(row.row_raw, "image_url") || "")
+                              .replace(/^http:\/\//i, "https://")
+                              .trim();
+                            return imageUrl ? (
+                              <img
+                                src={imageUrl}
+                                alt={`Item ${index + 1} ${safeRawValue(row.row_raw, "sku") || ""}`}
+                                className="ml-thumb"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <span className="ml-thumb-fallback">📦</span>
+                            );
+                          })()}
+                        </td>
+                        <td data-label="Anuncio">{row.ad_name || "-"}</td>
+                        <td data-label="SKU">{safeRawValue(row.row_raw, "sku") || "-"}</td>
+                        <td data-label="Variacao">{row.variation || "-"}</td>
+                        <td data-label="Qtd">{row.product_qty || 1}</td>
+                        <td data-label="Status">{isOrderPacked(row) ? "Embalado" : "Pendente"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </article>
         </div>
       )}
