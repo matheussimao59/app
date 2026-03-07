@@ -1,5 +1,6 @@
 ﻿import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { UiIcon } from "../components/UiIcon";
 
 type SellerProfile = {
   id: number;
@@ -1491,7 +1492,7 @@ export function MercadoLivrePage() {
       <div className="ml-v2-hero">
         <div>
           <p className="eyebrow">Mercado Livre</p>
-          <h2>Painel de Vendas</h2>
+          <h2 className="title-with-icon"><span className="title-icon" aria-hidden><UiIcon id="mercado_livre" /></span>Painel de Vendas</h2>
           <p className="page-text">Layout profissional com indicadores principais para usuarios comuns.</p>
           <div className={`ml-connection-pill ${connectionStatus.tone}`}>
             <span>{connectionStatus.label}</span>

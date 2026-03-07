@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { UiIcon } from "../components/UiIcon";
 
 type ShippingOrder = {
   id: string;
@@ -146,7 +147,7 @@ export function InicioPage() {
     <section className="page inicio-page">
       <div className="section-head row-between">
         <div>
-          <h2>Inicio</h2>
+          <h2 className="title-with-icon"><span className="title-icon" aria-hidden><UiIcon id="inicio" /></span>Inicio</h2>
           <p className="page-text">Painel principal para abrir o fluxo rapido do dia.</p>
         </div>
       </div>

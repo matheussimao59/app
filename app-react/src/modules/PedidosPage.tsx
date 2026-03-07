@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { UiIcon } from "../components/UiIcon";
 
 type OrderItem = {
   title?: string;
@@ -528,7 +529,7 @@ export function PedidosPage({ mode: _mode }: Props) {
       <div className="pedidos-main-col">
         <header className="pedidos-toolbar">
           <div>
-            <h2>Pedidos pendentes de envio</h2>
+            <h2 className="title-with-icon"><span className="title-icon" aria-hidden><UiIcon id="pedidos" /></span>Pedidos pendentes de envio</h2>
             <p className="page-text">Mostra pedidos não enviados e não cancelados (pagos/confirmados/em preparação).</p>
           </div>
           <div className="pedidos-toolbar-actions">

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { UiIcon } from "../components/UiIcon";
 
 const DEFAULT_TEMPLATE =
   "Ola! Obrigado pela compra. Para iniciar a personalizacao, envie: nome/texto, tema/cores e detalhes do pedido.";
@@ -74,7 +75,7 @@ export function MercadoLivreMensagensPage() {
   return (
     <section className="page">
       <div className="section-head">
-        <h2>Mensagens Mercado Livre</h2>
+        <h2 className="title-with-icon"><span className="title-icon" aria-hidden><UiIcon id="mensagens" /></span>Mensagens Mercado Livre</h2>
         <p className="page-text">Defina o texto padrao enviado ao comprador para coletar dados da personalizacao.</p>
       </div>
 

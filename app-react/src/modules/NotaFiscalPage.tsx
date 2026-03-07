@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { UiIcon } from "../components/UiIcon";
 
 type CachedOrder = {
   id: number;
@@ -424,7 +425,7 @@ export function NotaFiscalPage() {
     <section className="page">
       <div className="products-head">
         <div>
-          <h2>Nota Fiscal</h2>
+          <h2 className="title-with-icon"><span className="title-icon" aria-hidden><UiIcon id="nota_fiscal" /></span>Nota Fiscal</h2>
           <p className="page-text">Emissao e acompanhamento de NF por pedido.</p>
         </div>
       </div>

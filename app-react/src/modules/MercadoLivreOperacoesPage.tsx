@@ -1,5 +1,6 @@
 ﻿import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { UiIcon } from "../components/UiIcon";
 
 type OpsCard = {
   id: "importacao" | "calendario" | "separacao" | "pedidos";
@@ -82,7 +83,7 @@ export function MercadoLivreOperacoesPage() {
     <section className="page ml-ops-hub-page">
       <div className="section-head row-between">
         <div>
-          <h2>Operacoes de Pedido</h2>
+          <h2 className="title-with-icon"><span className="title-icon" aria-hidden><UiIcon id="mercado_livre" /></span>Operacoes de Pedido</h2>
           <p className="page-text">Acesse cada etapa separadamente para deixar o sistema mais organizado no PC e mobile.</p>
         </div>
       </div>

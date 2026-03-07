@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { UiIcon } from "../components/UiIcon";
 import {
   DEFAULT_ORDER_FEE_CONFIG,
   loadOrderFeeConfig,
@@ -530,7 +531,7 @@ export function PricingPage() {
   return (
     <section className="page pricing-page pricing-mirror">
       <div className="pricing-header-row">
-        <h2>Precificacao</h2>
+        <h2 className="title-with-icon"><span className="title-icon" aria-hidden><UiIcon id="precificacao" /></span>Precificacao</h2>
         <div className="pricing-header-actions">
           <button className="ghost-btn" type="button" onClick={openMaterialsModal}>Materiais</button>
           <Link to="/produtos" className="pricing-link-btn">Meus Produtos</Link>

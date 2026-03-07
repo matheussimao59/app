@@ -30,6 +30,14 @@ function NavIcon({ id }: { id: string }) {
     );
   }
 
+  if (id === "dashboard") {
+    return (
+      <svg {...props}>
+        <path d="M4 12h6v8H4zM14 4h6v16h-6zM9 7h6v13H9z" />
+      </svg>
+    );
+  }
+
   if (id === "calendario") {
     return (
       <svg {...props}>
@@ -122,6 +130,7 @@ export function AppLayout() {
   const mlActive = location.pathname.startsWith("/mercado-livre");
 
   const navItems: BaseNavItem[] = [
+    { id: "dashboard", label: "Financeiro", path: "/dashboard" },
     { id: "inicio", label: "Inicio", path: "/inicio" },
     ...(isLocalNfEnabled ? [{ id: "nota_fiscal", label: "Nota Fiscal", path: "/nota-fiscal" }] : []),
     { id: "precificacao", label: "Precificacao", path: "/precificacao" },

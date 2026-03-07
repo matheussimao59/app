@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { UiIcon } from "../components/UiIcon";
 
 type SeparacaoView = "all" | "importacao" | "calendario" | "producao" | "pedidos";
 
@@ -1389,7 +1390,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
       .filter((row) => {
         if (isOrderPacked(row) || isProductionSeparated(row)) return false;
         const shippingDate = shippingDateFromRaw(row.row_raw);
-        if (!shippingDate) return false;
+        if (!shippingDate) return true;
         return shippingDate >= todayYmd;
       })
       .map((row) => ({
@@ -1627,7 +1628,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
     <section className="page ml-separacao-page">
       <div className="section-head row-between">
         <div>
-          <h2>{pageTitle}</h2>
+          <h2 className="title-with-icon"><span className="title-icon" aria-hidden><UiIcon id="separacao" /></span>{pageTitle}</h2>
           <p className="page-text">{pageDesc}</p>
         </div>
       </div>
@@ -2016,7 +2017,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
           <div className="ml-orders-table-wrap" style={{ marginTop: 10 }}>
             <div className="ml-orders-head">
               <h3>Pedidos pendentes para producao</h3>
-              <span>{productionPendingAllDatesRows.length} grupo(s) com data hoje/futura</span>
+              <span>{productionPendingAllDatesRows.length} grupo(s), incluindo pedidos sem data</span>
             </div>
             <div className="table-wrap">
               <table className="table clean ml-shipping-table">

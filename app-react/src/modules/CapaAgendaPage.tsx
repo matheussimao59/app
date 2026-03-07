@@ -1,5 +1,6 @@
 ﻿import { FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { UiIcon } from "../components/UiIcon";
 
 type AgendaTab = "todo" | "printed";
 
@@ -345,7 +346,7 @@ export function CapaAgendaPage() {
     <section className="page capa-agenda-page">
       <div className="section-head row-between">
         <div>
-          <h2>Capa Agenda</h2>
+          <h2 className="title-with-icon"><span className="title-icon" aria-hidden><UiIcon id="capa_agenda" /></span>Capa Agenda</h2>
           <p className="page-text">Upload frente/verso por pedido e geracao de PDF em A4 vertical.</p>
         </div>
       </div>

@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { UiIcon } from "../components/UiIcon";
 import {
   DEFAULT_ORDER_FEE_CONFIG,
   type OrderFeeConfig,
@@ -624,7 +625,7 @@ export function ProductsPage() {
     <section className="page products-page">
       <div className="products-head">
         <div>
-          <h2>Meus Produtos</h2>
+          <h2 className="title-with-icon"><span className="title-icon" aria-hidden><UiIcon id="produtos" /></span>Meus Produtos</h2>
           <p className="page-text">Modulo real em React conectado ao Supabase.</p>
         </div>
         <button

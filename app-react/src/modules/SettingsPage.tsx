@@ -5,6 +5,7 @@ import {
   saveOrderFeeConfig,
   type OrderFeeConfig
 } from "../lib/orderFeeConfig";
+import { UiIcon } from "../components/UiIcon";
 
 function cloneConfig(config: OrderFeeConfig): OrderFeeConfig {
   return {
@@ -99,7 +100,7 @@ export function SettingsPage() {
   return (
     <section className="page settings-page">
       <div className="section-head">
-        <h2>Configuracoes</h2>
+        <h2 className="title-with-icon"><span className="title-icon" aria-hidden><UiIcon id="configuracoes" /></span>Configuracoes</h2>
         <p className="page-text">Taxas padrao e regras por marketplace salvas no Supabase.</p>
       </div>
 
