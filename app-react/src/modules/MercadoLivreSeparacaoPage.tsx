@@ -842,8 +842,9 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
       return;
     }
 
+    const dayLabel = shippingDateFilter === "sem-data" ? "Sem data" : formatDateOnly(shippingDateFilter);
     const shouldDelete = window.confirm(
-      `Excluir TODOS os ${ordersBySelectedDate.length} pedido(s) da data ${formatDateOnly(shippingDateFilter)}?`
+      `Excluir TODOS os ${ordersBySelectedDate.length} pedido(s) da data ${dayLabel}?`
     );
     if (!shouldDelete) return;
 
@@ -1108,20 +1109,21 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
   const ordersBySelectedDate = useMemo(
     () =>
       shippingDateFilter
-        ? savedOrders.filter((row) => shippingDateFromRaw(row.row_raw) === shippingDateFilter)
+        ? savedOrders.filter((row) => (shippingDateFromRaw(row.row_raw) || "sem-data") === shippingDateFilter)
         : savedOrders,
     [savedOrders, shippingDateFilter]
   );
 
   const filteredByTracking = useMemo(() => {
     const key = normalizeTracking(trackingSearch);
+    const baseRows = scannerMode ? savedOrders : ordersBySelectedDate;
     const byTracking = key
-      ? ordersBySelectedDate.filter((row) => normalizeTracking(row.tracking_number || "").includes(key))
-      : ordersBySelectedDate;
+      ? baseRows.filter((row) => normalizeTracking(row.tracking_number || "").includes(key))
+      : baseRows;
 
     const sorted = [...byTracking].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
     return key ? sorted.slice(0, 300) : sorted.slice(0, 200);
-  }, [ordersBySelectedDate, trackingSearch]);
+  }, [ordersBySelectedDate, savedOrders, trackingSearch, scannerMode]);
 
   const groupedOrdersBySelectedDate = useMemo(() => {
     const grouped = new Map<string, ShippingOrderGroup>();
@@ -1615,12 +1617,17 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
           : view === "pedidos"
             ? "Conferencia por rastreio, scanner e status de embalagem."
             : "Importe pedidos em .xlsx, organize por rastreio e consulte dados rapidamente para envio e conferencia.";
-  const selectedDayLabel = shippingDateFilter ? formatDateOnly(shippingDateFilter) : "Todos os dias";
+  const selectedDayLabel =
+    shippingDateFilter === "sem-data"
+      ? "Sem data"
+      : shippingDateFilter
+        ? formatDateOnly(shippingDateFilter)
+        : "Todos os dias";
   const noResultMessage = trackingSearch
-    ? shippingDateFilter
+    ? !scannerMode && shippingDateFilter
       ? `Nenhum pedido encontrado para o rastreio informado na data ${selectedDayLabel}.`
       : "Nenhum pedido encontrado para o rastreio informado."
-    : shippingDateFilter
+    : !scannerMode && shippingDateFilter
       ? `Nenhum pedido encontrado para a data ${selectedDayLabel}.`
       : "Nenhum pedido encontrado.";
 
@@ -1643,7 +1650,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             <span>Selecionar dia</span>
             <input
               type="date"
-              value={shippingDateFilter}
+              value={shippingDateFilter === "sem-data" ? "" : shippingDateFilter}
               onChange={(e) => setShippingDateFilter(normalizeDateToYmd(e.target.value))}
             />
           </label>
@@ -1799,7 +1806,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             <span>Calendario por dia</span>
             <input
               type="date"
-              value={shippingDateFilter}
+              value={shippingDateFilter === "sem-data" ? "" : shippingDateFilter}
               onChange={(e) => setShippingDateFilter(normalizeDateToYmd(e.target.value))}
             />
           </label>
@@ -1900,19 +1907,15 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
                     <td data-label="Embalados">{day.packed}</td>
                     <td data-label="Pendentes">{day.unpacked}</td>
                     <td data-label="Filtrar">
-                      {day.shippingDate !== "sem-data" ? (
-                        <button
-                          type="button"
-                          className={shippingDateFilter === day.shippingDate ? "primary-btn" : "ghost-btn"}
-                          onClick={() =>
-                            setShippingDateFilter((prev) => (prev === day.shippingDate ? "" : day.shippingDate))
-                          }
-                        >
-                          {shippingDateFilter === day.shippingDate ? "Remover filtro" : "Filtrar dia"}
-                        </button>
-                      ) : (
-                        "-"
-                      )}
+                      <button
+                        type="button"
+                        className={shippingDateFilter === day.shippingDate ? "primary-btn" : "ghost-btn"}
+                        onClick={() =>
+                          setShippingDateFilter((prev) => (prev === day.shippingDate ? "" : day.shippingDate))
+                        }
+                      >
+                        {shippingDateFilter === day.shippingDate ? "Remover filtro" : "Filtrar dia"}
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -1930,7 +1933,7 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
               <span>Filtrar dia</span>
               <input
                 type="date"
-                value={shippingDateFilter}
+                value={shippingDateFilter === "sem-data" ? "" : shippingDateFilter}
                 onChange={(e) => setShippingDateFilter(normalizeDateToYmd(e.target.value))}
               />
             </label>
