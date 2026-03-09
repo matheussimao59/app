@@ -107,8 +107,21 @@ export function AuthGate({ children }: AuthGateProps) {
   }
 
   async function handleLogout() {
-    if (!supabase) return;
-    await supabase.auth.signOut();
+    setError(null);
+    setAccountOpen(false);
+
+    if (!supabase) {
+      setUser(null);
+      return;
+    }
+
+    const { error: logoutError } = await supabase.auth.signOut({ scope: "local" });
+    if (logoutError) {
+      setError(`Nao foi possivel sair agora: ${logoutError.message}`);
+      return;
+    }
+
+    setUser(null);
   }
 
   if (!splashDone || loading) {

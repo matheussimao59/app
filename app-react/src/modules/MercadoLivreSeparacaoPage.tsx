@@ -505,13 +505,60 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
           }
         };
       });
-      const payload = preparedRows.map((row) => row.db);
+      const mergedByImportKey = new Map<string, (typeof preparedRows)[number]>();
+      for (const row of preparedRows) {
+        const current = mergedByImportKey.get(row.importKey);
+        if (!current) {
+          mergedByImportKey.set(row.importKey, row);
+          continue;
+        }
+
+        const mergedRaw = { ...(current.db.row_raw || {}), ...(row.db.row_raw || {}) };
+        const mergedQty = Math.max(Number(current.db.product_qty) || 0, Number(row.db.product_qty) || 0, 1);
+        mergedByImportKey.set(row.importKey, {
+          ...current,
+          shippingDeadline: current.shippingDeadline || row.shippingDeadline,
+          db: {
+            ...current.db,
+            platform_order_number: current.db.platform_order_number || row.db.platform_order_number,
+            ad_name:
+              (current.db.ad_name && normalizeText(current.db.ad_name) !== "produto sem titulo"
+                ? current.db.ad_name
+                : row.db.ad_name) || "Produto sem titulo",
+            variation: current.db.variation || row.db.variation,
+            image_url: current.db.image_url || row.db.image_url,
+            buyer_notes: current.db.buyer_notes || row.db.buyer_notes,
+            observations: current.db.observations || row.db.observations,
+            product_qty: mergedQty,
+            recipient_name: current.db.recipient_name || row.db.recipient_name,
+            tracking_number: current.db.tracking_number || row.db.tracking_number,
+            source_file_name: current.db.source_file_name || row.db.source_file_name,
+            row_raw: mergedRaw,
+            updated_at: new Date().toISOString()
+          }
+        });
+      }
+      const dedupedPreparedRows = [...mergedByImportKey.values()];
+      const payload = dedupedPreparedRows.map((row) => row.db);
 
       const keys = payload.map((row) => row.import_key);
       const existingKeys = new Set<string>();
       const existingRowsByKey = new Map<
         string,
-        { id: string; observations: string | null; row_raw: Record<string, unknown> | null }
+        {
+          id: string;
+          platform_order_number: string | null;
+          ad_name: string | null;
+          variation: string | null;
+          image_url: string | null;
+          buyer_notes: string | null;
+          observations: string | null;
+          product_qty: number | null;
+          recipient_name: string | null;
+          tracking_number: string | null;
+          source_file_name: string | null;
+          row_raw: Record<string, unknown> | null;
+        }
       >();
       const chunkSize = 400;
 
@@ -519,7 +566,9 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
         const chunk = keys.slice(i, i + chunkSize);
         const { data: existingRows, error: existingError } = await supabase
           .from("ml_shipping_orders")
-          .select("id, import_key, observations, row_raw")
+          .select(
+            "id, import_key, platform_order_number, ad_name, variation, image_url, buyer_notes, observations, product_qty, recipient_name, tracking_number, source_file_name, row_raw"
+          )
           .eq("user_id", userId)
           .in("import_key", chunk);
 
@@ -531,7 +580,16 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
           if (key && id) {
             existingRowsByKey.set(key, {
               id,
+              platform_order_number: typeof row.platform_order_number === "string" ? row.platform_order_number : null,
+              ad_name: typeof row.ad_name === "string" ? row.ad_name : null,
+              variation: typeof row.variation === "string" ? row.variation : null,
+              image_url: typeof row.image_url === "string" ? row.image_url : null,
+              buyer_notes: typeof row.buyer_notes === "string" ? row.buyer_notes : null,
               observations: typeof row.observations === "string" ? row.observations : null,
+              product_qty: typeof row.product_qty === "number" ? row.product_qty : null,
+              recipient_name: typeof row.recipient_name === "string" ? row.recipient_name : null,
+              tracking_number: typeof row.tracking_number === "string" ? row.tracking_number : null,
+              source_file_name: typeof row.source_file_name === "string" ? row.source_file_name : null,
               row_raw: (row.row_raw as Record<string, unknown> | null) || null
             });
           }
@@ -539,48 +597,97 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
       }
 
       const onlyNewRows = payload.filter((row) => !existingKeys.has(row.import_key));
-      const existingRowsWithNewObservation = preparedRows.filter((row) => {
-        const existing = existingRowsByKey.get(row.importKey);
-        if (!existing) return false;
-        const nextObservation = String(row.db.observations || "").trim();
-        if (!nextObservation) return false;
-        const currentObservation = String(existing.observations || "").trim();
-        return nextObservation !== currentObservation;
-      });
+      const isBlank = (value: unknown) =>
+        value === null ||
+        value === undefined ||
+        (typeof value === "string" && value.trim().length === 0);
+      const pickMissingText = (current: unknown, incoming: unknown) => {
+        const curr = String(current || "").trim();
+        const next = String(incoming || "").trim();
+        return !curr && next ? next : null;
+      };
+      const existingRowsToUpdate = dedupedPreparedRows
+        .map((row) => {
+          const existing = existingRowsByKey.get(row.importKey);
+          if (!existing) return null;
+
+          const updatePayload: Record<string, unknown> = {};
+
+          const platformOrder = pickMissingText(existing.platform_order_number, row.db.platform_order_number);
+          if (platformOrder) updatePayload.platform_order_number = platformOrder;
+
+          const currentAd = String(existing.ad_name || "").trim();
+          const incomingAd = String(row.db.ad_name || "").trim();
+          if ((!currentAd || normalizeText(currentAd) === "produto sem titulo") && incomingAd) {
+            updatePayload.ad_name = incomingAd;
+          }
+
+          const variation = pickMissingText(existing.variation, row.db.variation);
+          if (variation) updatePayload.variation = variation;
+
+          const imageUrl = pickMissingText(existing.image_url, row.db.image_url);
+          if (imageUrl) updatePayload.image_url = imageUrl;
+
+          const buyerNotes = pickMissingText(existing.buyer_notes, row.db.buyer_notes);
+          if (buyerNotes) updatePayload.buyer_notes = buyerNotes;
+
+          const observations = pickMissingText(existing.observations, row.db.observations);
+          if (observations) updatePayload.observations = observations;
+
+          const recipient = pickMissingText(existing.recipient_name, row.db.recipient_name);
+          if (recipient) updatePayload.recipient_name = recipient;
+
+          const tracking = pickMissingText(existing.tracking_number, row.db.tracking_number);
+          if (tracking) updatePayload.tracking_number = tracking;
+
+          const sourceFile = pickMissingText(existing.source_file_name, row.db.source_file_name);
+          if (sourceFile) updatePayload.source_file_name = sourceFile;
+
+          const currentQty = Number(existing.product_qty) || 0;
+          const incomingQty = Number(row.db.product_qty) || 0;
+          if (currentQty <= 0 && incomingQty > 0) updatePayload.product_qty = incomingQty;
+
+          const nextRaw: Record<string, unknown> = { ...(existing.row_raw || {}) };
+          let rawChanged = false;
+          for (const [key, value] of Object.entries(row.db.row_raw || {})) {
+            if (isBlank(nextRaw[key]) && !isBlank(value)) {
+              nextRaw[key] = value;
+              rawChanged = true;
+            }
+          }
+          if (rawChanged) updatePayload.row_raw = nextRaw;
+
+          if (!Object.keys(updatePayload).length) return null;
+          updatePayload.updated_at = new Date().toISOString();
+          return { id: existing.id, payload: updatePayload };
+        })
+        .filter((row): row is { id: string; payload: Record<string, unknown> } => Boolean(row));
 
       if (onlyNewRows.length > 0) {
         const { error: saveError } = await supabase.from("ml_shipping_orders").insert(onlyNewRows);
         if (saveError) throw new Error(saveError.message);
       }
 
-      let updatedObservations = 0;
-      for (const row of existingRowsWithNewObservation) {
-        const existing = existingRowsByKey.get(row.importKey);
-        if (!existing) continue;
-        const nextObservation = String(row.db.observations || "").trim();
-        const nextRaw = { ...(existing.row_raw || {}) };
-        nextRaw.observations = nextObservation;
-
+      let updatedRows = 0;
+      for (const row of existingRowsToUpdate) {
         const { error: updateError } = await supabase
           .from("ml_shipping_orders")
-          .update({
-            observations: nextObservation,
-            row_raw: nextRaw,
-            updated_at: new Date().toISOString()
-          })
+          .update(row.payload)
           .eq("user_id", userId)
-          .eq("id", existing.id);
+          .eq("id", row.id);
 
         if (updateError) throw new Error(updateError.message);
-        updatedObservations += 1;
+        updatedRows += 1;
       }
 
       await loadSavedOrders(userId);
-      const ignoredCount = payload.length - onlyNewRows.length;
+      const ignoredCount = payload.length - onlyNewRows.length - updatedRows;
+      const dedupedInFile = Math.max(0, preparedRows.length - dedupedPreparedRows.length);
       setStatus(
         `${onlyNewRows.length} etiqueta(s) nova(s) importada(s). ` +
-          `${Math.max(0, ignoredCount)} etiqueta(s) ja existia(m) e foi(ram) ignorada(s). ` +
-          `${updatedObservations} observacao(oes) atualizada(s).`
+          `${updatedRows} pedido(s) existente(s) atualizado(s) com dados faltantes. ` +
+          `${Math.max(0, ignoredCount)} pedido(s) sem mudanca. ` +
+          `${dedupedInFile} duplicado(s) removido(s) na lista enviada.`
       );
     } catch (e) {
       const message = e instanceof Error ? e.message : "Falha ao salvar pedidos.";

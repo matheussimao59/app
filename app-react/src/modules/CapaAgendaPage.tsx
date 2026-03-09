@@ -26,6 +26,24 @@ type CapaAgendaDbRow = {
   updated_at: string;
 };
 
+const CAPA_ITEMS_LIMIT = 120;
+const CAPA_IMAGE_BATCH = 12;
+
+async function runWithAbortRetry<T>(fn: () => Promise<T>, attempts = 3) {
+  let lastError: unknown = null;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastError = e;
+      const message = e instanceof Error ? e.message : String(e || "");
+      if (!message.toLowerCase().includes("abort") || i === attempts - 1) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 250 * (i + 1)));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Falha ao carregar dados.");
+}
+
 function mapRowToItem(row: CapaAgendaDbRow): CapaAgendaItem {
   return {
     id: row.id,
@@ -37,6 +55,8 @@ function mapRowToItem(row: CapaAgendaDbRow): CapaAgendaItem {
     printedAt: row.printed_at || undefined
   };
 }
+
+type CapaAgendaMetaRow = Omit<CapaAgendaDbRow, "front_image" | "back_image">;
 
 function toDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -142,62 +162,184 @@ export function CapaAgendaPage() {
 
   async function resolveUserId() {
     if (userId) return userId;
-    if (!supabase) return null;
-    const { data, error: authError } = await supabase.auth.getUser();
-    if (authError) return null;
-    const uid = data.user?.id || null;
+    const client = supabase;
+    if (!client) return null;
+
+    const sessionRes = await runWithAbortRetry(async () => await client.auth.getSession(), 2);
+    const bySession = sessionRes.data.session?.user?.id || null;
+    if (bySession) {
+      setUserId(bySession);
+      return bySession;
+    }
+
+    const authRes = await runWithAbortRetry(async () => await client.auth.getUser(), 2);
+    if (authRes.error) return null;
+    const uid = authRes.data.user?.id || null;
     if (uid) setUserId(uid);
     return uid;
   }
 
   async function loadItems(uid: string) {
-    if (!supabase) return;
+    const client = supabase;
+    if (!client) return;
 
-    const { data, error: loadError } = await supabase
-      .from("capa_agenda_items")
-      .select("*")
-      .eq("user_id", uid)
-      .order("updated_at", { ascending: false })
-      .limit(2000);
+    const baseMetaSelect = "id, user_id, order_id, printed, created_at, printed_at, updated_at";
+    const { data, error: loadError } = await runWithAbortRetry(
+      async () =>
+        await client
+          .from("capa_agenda_items")
+          .select(baseMetaSelect)
+          .eq("user_id", uid)
+          .order("updated_at", { ascending: false })
+          .limit(CAPA_ITEMS_LIMIT),
+      3
+    );
+
+    if (loadError && loadError.message.toLowerCase().includes("updated_at")) {
+      const fallback = await runWithAbortRetry(
+        async () =>
+          await client
+            .from("capa_agenda_items")
+            .select("id, user_id, order_id, printed, created_at, printed_at")
+            .eq("user_id", uid)
+            .order("created_at", { ascending: false })
+            .limit(CAPA_ITEMS_LIMIT),
+        3
+      );
+
+      if (fallback.error) throw new Error(fallback.error.message);
+      const metaRows = ((fallback.data || []) as Array<CapaAgendaMetaRow & { updated_at?: string }>).map((row) => ({
+        ...row,
+        updated_at: row.updated_at || row.created_at
+      }));
+      const ids = metaRows.map((row) => row.id);
+      const imageMap = new Map<string, { front_image: string; back_image: string }>();
+      for (let i = 0; i < ids.length; i += CAPA_IMAGE_BATCH) {
+        const chunk = ids.slice(i, i + CAPA_IMAGE_BATCH);
+        const { data: imageRows, error: imageError } = await runWithAbortRetry(
+          async () =>
+            await client
+              .from("capa_agenda_items")
+              .select("id, front_image, back_image")
+              .eq("user_id", uid)
+              .in("id", chunk),
+          3
+        );
+        if (imageError) throw new Error(imageError.message);
+        for (const row of imageRows || []) {
+          if (typeof row.id !== "string") continue;
+          imageMap.set(row.id, {
+            front_image: typeof row.front_image === "string" ? row.front_image : "",
+            back_image: typeof row.back_image === "string" ? row.back_image : ""
+          });
+        }
+      }
+      const rows = metaRows.map((row) => {
+        const images = imageMap.get(row.id);
+        return {
+          ...(row as CapaAgendaMetaRow),
+          front_image: images?.front_image || "",
+          back_image: images?.back_image || ""
+        } as CapaAgendaDbRow;
+      });
+      setItems(rows.map(mapRowToItem));
+      return;
+    }
 
     if (loadError) throw new Error(loadError.message);
-    setItems(((data || []) as CapaAgendaDbRow[]).map(mapRowToItem));
+    const metaRows = (data || []) as CapaAgendaMetaRow[];
+    if (!metaRows.length) {
+      setItems([]);
+      return;
+    }
+
+    const ids = metaRows.map((row) => row.id);
+    const imageMap = new Map<string, { front_image: string; back_image: string }>();
+    for (let i = 0; i < ids.length; i += CAPA_IMAGE_BATCH) {
+      const chunk = ids.slice(i, i + CAPA_IMAGE_BATCH);
+      const { data: imageRows, error: imageError } = await runWithAbortRetry(
+        async () =>
+          await client
+            .from("capa_agenda_items")
+            .select("id, front_image, back_image")
+            .eq("user_id", uid)
+            .in("id", chunk),
+        3
+      );
+      if (imageError) throw new Error(imageError.message);
+      for (const row of imageRows || []) {
+        if (typeof row.id !== "string") continue;
+        imageMap.set(row.id, {
+          front_image: typeof row.front_image === "string" ? row.front_image : "",
+          back_image: typeof row.back_image === "string" ? row.back_image : ""
+        });
+      }
+    }
+
+    const rows = metaRows.map((row) => {
+      const images = imageMap.get(row.id);
+      return {
+        ...(row as CapaAgendaMetaRow),
+        front_image: images?.front_image || "",
+        back_image: images?.back_image || ""
+      } as CapaAgendaDbRow;
+    });
+    setItems(rows.map(mapRowToItem));
   }
 
   useEffect(() => {
     async function run() {
-      if (!supabase) {
-        setError("Supabase nao configurado.");
-        setLoadingInit(false);
-        return;
-      }
-
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) {
-        setError(`Falha ao validar usuario: ${authError.message}`);
-        setLoadingInit(false);
-        return;
-      }
-
-      const uid = authData.user?.id || null;
-      setUserId(uid);
-      if (!uid) {
-        setError("Usuario nao autenticado.");
-        setLoadingInit(false);
-        return;
-      }
-
       try {
+        if (!supabase) {
+          setError("Supabase nao configurado.");
+          return;
+        }
+
+        const uid = await resolveUserId();
+        setUserId(uid);
+        if (!uid) {
+          setError("Usuario nao autenticado.");
+          return;
+        }
+
         await loadItems(uid);
       } catch (e) {
         const message = e instanceof Error ? e.message : "Falha ao carregar capas.";
-        setError(message);
+        const normalized = String(message || "").toLowerCase();
+        if (normalized.includes("abort")) {
+          setError("Conexao interrompida ao carregar capas. Tente atualizar a pagina.");
+        } else {
+          setError(message);
+        }
       } finally {
         setLoadingInit(false);
       }
     }
 
     void run();
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      const uid = session?.user?.id || null;
+      setUserId(uid);
+      if (!uid) {
+        setItems([]);
+        return;
+      }
+      setLoadingInit(true);
+      setError(null);
+      void loadItems(uid)
+        .catch((e) => {
+          const message = e instanceof Error ? e.message : "Falha ao carregar capas.";
+          setError(message);
+        })
+        .finally(() => setLoadingInit(false));
+    });
+    return () => {
+      data.subscription.unsubscribe();
+    };
   }, []);
 
   const filtered = useMemo(
@@ -268,7 +410,11 @@ export function CapaAgendaPage() {
       updated_at: nowIso
     };
 
-    const { data, error: insertError } = await supabase.from("capa_agenda_items").insert(payload).select("*").single();
+    const { data, error: insertError } = await supabase
+      .from("capa_agenda_items")
+      .insert(payload)
+      .select("id, user_id, order_id, front_image, back_image, printed, created_at, printed_at, updated_at")
+      .single();
     if (insertError) {
       setError(`Nao foi possivel salvar no Supabase: ${insertError.message}`);
       return;
@@ -380,6 +526,9 @@ export function CapaAgendaPage() {
           Gerar PDF {selectedItems.length > 0 ? `(${selectedItems.length})` : ""}
         </button>
       </div>
+
+      {error && <p className="error-text">{error}</p>}
+      {status && <p className="page-text">{status}</p>}
 
       <div className="calendar-flow-tabs capa-agenda-tabs">
         <button className={tab === "todo" ? "tab-item active" : "tab-item"} type="button" onClick={() => setTab("todo")}>
