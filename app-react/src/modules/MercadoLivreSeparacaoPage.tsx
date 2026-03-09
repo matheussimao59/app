@@ -2327,11 +2327,12 @@ export function MercadoLivreSeparacaoPage(props?: { view?: SeparacaoView }) {
             <div className="ml-shipping-detail-list">
               <p className="ml-detail-priority"><strong>Pedido:</strong> <span className="ml-detail-badge">{selectedOrder.platform_order_number || "-"}</span></p>
               <p><strong>Rastreio:</strong> {selectedOrder.tracking_number || "-"}</p>
-              <p className="ml-detail-priority"><strong>Destinatario:</strong> <span className="ml-detail-badge">{selectedOrder.recipient_name || "-"}</span></p>
+              <p className="ml-detail-priority"><strong>Destinatario:</strong> <span className="ml-detail-badge">{selectedOrder.recipient_name || safeRawValue(selectedOrder.row_raw, "recipient_name") || safeRawValue(selectedOrder.row_raw, "destinatario") || safeRawValue(selectedOrder.row_raw, "nome do destinatario") || "-"}</span></p>
               <p><strong>Itens no pedido:</strong> {selectedOrderGroupMeta?.itemsCount || selectedOrderGroup.length}</p>
               <p className="ml-detail-priority"><strong>Qtd total:</strong> <span className="ml-detail-badge">{selectedOrderGroupMeta?.totalQty || Math.max(1, Number(selectedOrder.product_qty) || 1)}</span></p>
               <p><strong>Data de envio:</strong> {formatDateOnly(shippingDateFromRaw(selectedOrder.row_raw))}</p>
               <p><strong>Status:</strong> {selectedOrderGroupMeta?.fullyPacked ? "Embalado" : "Pendente"}</p>
+              <p><strong>Observacoes:</strong> {selectedOrder.observations || safeRawValue(selectedOrder.row_raw, "observations") || "-"}</p>
               {selectedOrderGroupMeta && (
                 <div className="ml-packed-order-actions">
                   <button
