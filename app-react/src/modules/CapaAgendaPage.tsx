@@ -140,6 +140,16 @@ export function CapaAgendaPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  async function resolveUserId() {
+    if (userId) return userId;
+    if (!supabase) return null;
+    const { data, error: authError } = await supabase.auth.getUser();
+    if (authError) return null;
+    const uid = data.user?.id || null;
+    if (uid) setUserId(uid);
+    return uid;
+  }
+
   async function loadItems(uid: string) {
     if (!supabase) return;
 
@@ -231,7 +241,8 @@ export function CapaAgendaPage() {
     setError(null);
     setStatus(null);
 
-    if (!supabase || !userId) {
+    const uid = await resolveUserId();
+    if (!supabase || !uid) {
       setError("Usuario nao autenticado.");
       return;
     }
@@ -248,7 +259,7 @@ export function CapaAgendaPage() {
 
     const nowIso = new Date().toISOString();
     const payload = {
-      user_id: userId,
+      user_id: uid,
       order_id: orderId.trim(),
       front_image: frontImage,
       back_image: backImage,
@@ -270,7 +281,8 @@ export function CapaAgendaPage() {
   }
 
   async function togglePrinted(item: CapaAgendaItem) {
-    if (!supabase || !userId) {
+    const uid = await resolveUserId();
+    if (!supabase || !uid) {
       setError("Usuario nao autenticado.");
       return;
     }
@@ -285,7 +297,7 @@ export function CapaAgendaPage() {
         printed_at: printedAt,
         updated_at: new Date().toISOString()
       })
-      .eq("user_id", userId)
+      .eq("user_id", uid)
       .eq("id", item.id);
 
     if (updateError) {
@@ -307,7 +319,8 @@ export function CapaAgendaPage() {
   }
 
   async function removeItem(itemId: string) {
-    if (!supabase || !userId) {
+    const uid = await resolveUserId();
+    if (!supabase || !uid) {
       setError("Usuario nao autenticado.");
       return;
     }
@@ -318,7 +331,7 @@ export function CapaAgendaPage() {
     const { error: deleteError } = await supabase
       .from("capa_agenda_items")
       .delete()
-      .eq("user_id", userId)
+      .eq("user_id", uid)
       .eq("id", itemId);
 
     if (deleteError) {
