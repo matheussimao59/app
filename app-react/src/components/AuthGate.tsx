@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { apiBaseUrl, hasApiConfig, hasSupabaseConfig, supabase } from "../lib/supabase";
-import { apiLogin, apiLogout, apiMe, clearApiToken, getApiToken, setApiToken, type ApiUser } from "../lib/api";
+import { apiLogin, apiLogout, apiMe, apiRegister, clearApiToken, getApiToken, setApiToken, type ApiUser } from "../lib/api";
 
 interface AuthGateProps {
   children: (user: ApiUser) => JSX.Element;
@@ -11,6 +11,7 @@ export function AuthGate({ children }: AuthGateProps) {
   const REMEMBER_LOGIN_KEY = "auth_remember_login";
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<ApiUser | null>(null);
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberLogin, setRememberLogin] = useState(true);
@@ -118,13 +119,10 @@ export function AuthGate({ children }: AuthGateProps) {
     setError(null);
 
     if (hasApiConfig && !hasSupabaseConfig) {
-      if (isSignUp) {
-        setError("Cadastro via API ainda nao foi implementado.");
-        return;
-      }
-
       try {
-        const payload = await apiLogin(email, password);
+        const payload = isSignUp
+          ? await apiRegister(name.trim() || email.trim(), email, password)
+          : await apiLogin(email, password);
         setApiToken(payload.token);
         setUser(payload.user);
 
@@ -263,6 +261,17 @@ export function AuthGate({ children }: AuthGateProps) {
         <p>Acesse sua conta para continuar.</p>
         {info && <p className="info">{info}</p>}
         <form onSubmit={handleSubmit}>
+          {isSignUp && (
+            <label>
+              Nome
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required={isSignUp}
+              />
+            </label>
+          )}
           <label>
             E-mail
             <input

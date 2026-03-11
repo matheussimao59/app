@@ -10,6 +10,38 @@ use Illuminate\Support\Facades\Validator;
 
 final class AuthController
 {
+    public function register(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'name' => ['required', 'string', 'max:120'],
+            'email' => ['required', 'email', 'max:190', 'unique:users,email'],
+            'password' => ['required', 'string', 'min:6'],
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Dados invalidos para cadastro.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $user = User::query()->create([
+            'name' => $request->string('name')->toString(),
+            'email' => $request->string('email')->toString(),
+            'password' => $request->string('password')->toString(),
+            'role' => 'admin',
+            'is_active' => 1,
+        ]);
+
+        $token = $user->createToken('frontend')->plainTextToken;
+
+        return response()->json([
+            'message' => 'Conta criada com sucesso.',
+            'token' => $token,
+            'user' => $this->mapUser($user),
+        ], 201);
+    }
+
     public function login(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [

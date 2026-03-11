@@ -1,4 +1,5 @@
-const API_URL = (((import.meta as any)?.env?.VITE_API_URL as string | undefined) || "").replace(/\/+$/, "");
+const fallbackApiUrl = "https://api.unicaprint.com.br/api";
+const API_URL = ((((import.meta as any)?.env?.VITE_API_URL as string | undefined) || fallbackApiUrl) || "").replace(/\/+$/, "");
 const AUTH_TOKEN_KEY = "api_auth_token";
 
 export type ApiUser = {
@@ -69,6 +70,13 @@ export async function apiLogin(email: string, password: string) {
   return await apiRequest<{ message: string; token: string; user: ApiUser }>("/auth/login", {
     method: "POST",
     body: { email, password }
+  });
+}
+
+export async function apiRegister(name: string, email: string, password: string) {
+  return await apiRequest<{ message: string; token: string; user: ApiUser }>("/auth/register", {
+    method: "POST",
+    body: { name, email, password }
   });
 }
 
