@@ -1,0 +1,19 @@
+{
+  "name": "unicaprint/backend",
+  "description": "Base de API Laravel para o sistema Unica Print",
+  "type": "project",
+  "require": {
+    "php": "^8.2",
+    "laravel/framework": "^12.0",
+    "laravel/sanctum": "^4.0"
+  },
+  "require-dev": {
+    "laravel/pint": "^1.0",
+    "phpunit/phpunit": "^11.0"
+  },
+  "scripts": {
+    "post-root-package-install": [
+      "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
+    ]
+  }
+}

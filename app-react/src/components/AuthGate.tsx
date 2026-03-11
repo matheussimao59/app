@@ -1,6 +1,6 @@
-﻿import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
-import { hasSupabaseConfig, supabase } from "../lib/supabase";
+import { apiBaseUrl, hasApiConfig, hasSupabaseConfig, supabase } from "../lib/supabase";
 
 interface AuthGateProps {
   children: (user: User) => JSX.Element;
@@ -9,6 +9,14 @@ interface AuthGateProps {
 export function AuthGate({ children }: AuthGateProps) {
   const SAVED_EMAIL_KEY = "auth_saved_email";
   const REMEMBER_LOGIN_KEY = "auth_remember_login";
+  const localUser = useMemo(
+    () =>
+      ({
+        id: "local-vps-user",
+        email: "vps-local@local"
+      }) as User,
+    []
+  );
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState("");
@@ -34,6 +42,7 @@ export function AuthGate({ children }: AuthGateProps) {
 
   useEffect(() => {
     if (!supabase) {
+      setUser(localUser);
       setLoading(false);
       return;
     }
@@ -50,7 +59,7 @@ export function AuthGate({ children }: AuthGateProps) {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [localUser]);
 
   useEffect(() => {
     if (!accountOpen) return;
@@ -76,7 +85,8 @@ export function AuthGate({ children }: AuthGateProps) {
 
   const info = useMemo(() => {
     if (hasSupabaseConfig) return null;
-    return "Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no arquivo .env.";
+    if (hasApiConfig) return `Supabase desativado. Configure a autenticacao da VPS em ${apiBaseUrl}.`;
+    return "Supabase desativado. Configure VITE_API_URL no arquivo .env para usar sua VPS.";
   }, []);
 
   async function handleSubmit(event: FormEvent) {
@@ -111,7 +121,6 @@ export function AuthGate({ children }: AuthGateProps) {
     setAccountOpen(false);
 
     if (!supabase) {
-      setUser(null);
       return;
     }
 
@@ -144,6 +153,10 @@ export function AuthGate({ children }: AuthGateProps) {
         </div>
       </div>
     );
+  }
+
+  if (!hasSupabaseConfig) {
+    return children(localUser);
   }
 
   if (user) {
@@ -227,5 +240,3 @@ export function AuthGate({ children }: AuthGateProps) {
     </div>
   );
 }
-
-
