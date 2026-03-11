@@ -19,6 +19,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/financial/dashboard', [FinancialController::class, 'dashboard']);
     Route::apiResource('financial/categories', FinancialController::class)->parameter('categories', 'category');
+    Route::post('/financial/accounts', [FinancialController::class, 'storeAccount']);
+    Route::post('/financial/transactions', [FinancialController::class, 'storeTransaction']);
 
     Route::get('/shipping/orders', [ShippingOrderController::class, 'index']);
     Route::post('/shipping/orders/import', [ShippingOrderController::class, 'import']);
