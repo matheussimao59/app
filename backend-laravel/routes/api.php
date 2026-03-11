@@ -11,11 +11,12 @@ Route::get('/health', HealthController::class);
 
 Route::prefix('auth')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
-    Route::post('/logout', [AuthController::class, 'logout']);
-    Route::get('/me', [AuthController::class, 'me']);
 });
 
 Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/auth/logout', [AuthController::class, 'logout']);
+    Route::get('/auth/me', [AuthController::class, 'me']);
+
     Route::get('/financial/dashboard', [FinancialController::class, 'dashboard']);
     Route::apiResource('financial/categories', FinancialController::class)->parameter('categories', 'category');
 

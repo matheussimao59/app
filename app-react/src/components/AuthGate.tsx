@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { User } from "@supabase/supabase-js";
 import { apiBaseUrl, hasApiConfig, hasSupabaseConfig, supabase } from "../lib/supabase";
+import { apiLogin, apiLogout, apiMe, clearApiToken, getApiToken, setApiToken, type ApiUser } from "../lib/api";
 
 interface AuthGateProps {
-  children: (user: User) => JSX.Element;
+  children: (user: ApiUser) => JSX.Element;
 }
 
 export function AuthGate({ children }: AuthGateProps) {
@@ -13,12 +13,14 @@ export function AuthGate({ children }: AuthGateProps) {
     () =>
       ({
         id: "local-vps-user",
-        email: "vps-local@local"
-      }) as User,
+        name: "Usuario VPS",
+        email: "vps-local@local",
+        role: "admin"
+      }) as ApiUser,
     []
   );
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<ApiUser | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberLogin, setRememberLogin] = useState(true);
@@ -41,24 +43,59 @@ export function AuthGate({ children }: AuthGateProps) {
   }, []);
 
   useEffect(() => {
-    if (!supabase) {
-      setUser(localUser);
-      setLoading(false);
-      return;
+    let active = true;
+    let unsubscribe: (() => void) | null = null;
+
+    async function boot() {
+      if (hasApiConfig && !hasSupabaseConfig) {
+        const token = getApiToken();
+        if (!token) {
+          if (active) setLoading(false);
+          return;
+        }
+        try {
+          const me = await apiMe(token);
+          if (active) setUser(me);
+        } catch {
+          clearApiToken();
+          if (active) setUser(null);
+        } finally {
+          if (active) setLoading(false);
+        }
+        return;
+      }
+
+      if (!supabase) {
+        if (active) {
+          setUser(localUser);
+          setLoading(false);
+        }
+        return;
+      }
+
+      supabase.auth.getSession().then(({ data }) => {
+        const sessionUser = data.session?.user;
+        if (!active) return;
+        setUser(sessionUser ? { id: sessionUser.id, email: sessionUser.email || "", name: sessionUser.email || "", role: null } : null);
+        setLoading(false);
+      });
+
+      const {
+        data: { subscription }
+      } = supabase.auth.onAuthStateChange((_event, session) => {
+        const sessionUser = session?.user;
+        if (!active) return;
+        setUser(sessionUser ? { id: sessionUser.id, email: sessionUser.email || "", name: sessionUser.email || "", role: null } : null);
+      });
+      unsubscribe = () => subscription.unsubscribe();
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
-      setLoading(false);
-    });
+    void boot();
 
-    const {
-      data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    return () => subscription.unsubscribe();
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
   }, [localUser]);
 
   useEffect(() => {
@@ -84,16 +121,42 @@ export function AuthGate({ children }: AuthGateProps) {
   }, []);
 
   const info = useMemo(() => {
+    if (hasApiConfig && !hasSupabaseConfig) return `Login ativo pela API da VPS em ${apiBaseUrl}.`;
     if (hasSupabaseConfig) return null;
-    if (hasApiConfig) return `Supabase desativado. Configure a autenticacao da VPS em ${apiBaseUrl}.`;
     return "Supabase desativado. Configure VITE_API_URL no arquivo .env para usar sua VPS.";
   }, []);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    setError(null);
+
+    if (hasApiConfig && !hasSupabaseConfig) {
+      if (isSignUp) {
+        setError("Cadastro via API ainda nao foi implementado.");
+        return;
+      }
+
+      try {
+        const payload = await apiLogin(email, password);
+        setApiToken(payload.token);
+        setUser(payload.user);
+
+        if (rememberLogin) {
+          localStorage.setItem(SAVED_EMAIL_KEY, email.trim());
+          localStorage.setItem(REMEMBER_LOGIN_KEY, "1");
+        } else {
+          localStorage.removeItem(SAVED_EMAIL_KEY);
+          localStorage.setItem(REMEMBER_LOGIN_KEY, "0");
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Falha ao autenticar na API.";
+        setError(message);
+      }
+      return;
+    }
+
     if (!supabase) return;
 
-    setError(null);
     if (isSignUp) {
       const { error: signUpError } = await supabase.auth.signUp({ email, password });
       if (signUpError) setError(signUpError.message);
@@ -119,6 +182,17 @@ export function AuthGate({ children }: AuthGateProps) {
   async function handleLogout() {
     setError(null);
     setAccountOpen(false);
+
+    if (hasApiConfig && !hasSupabaseConfig) {
+      try {
+        await apiLogout(getApiToken());
+      } catch {
+        // Limpeza local deve ocorrer mesmo se a API falhar.
+      }
+      clearApiToken();
+      setUser(null);
+      return;
+    }
 
     if (!supabase) {
       return;
@@ -156,7 +230,11 @@ export function AuthGate({ children }: AuthGateProps) {
   }
 
   if (!hasSupabaseConfig) {
-    return children(localUser);
+    if (hasApiConfig) {
+      if (user) return children(user);
+    } else {
+      return children(localUser);
+    }
   }
 
   if (user) {
