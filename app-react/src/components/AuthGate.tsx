@@ -9,16 +9,6 @@ interface AuthGateProps {
 export function AuthGate({ children }: AuthGateProps) {
   const SAVED_EMAIL_KEY = "auth_saved_email";
   const REMEMBER_LOGIN_KEY = "auth_remember_login";
-  const localUser = useMemo(
-    () =>
-      ({
-        id: "local-vps-user",
-        name: "Usuario VPS",
-        email: "vps-local@local",
-        role: "admin"
-      }) as ApiUser,
-    []
-  );
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<ApiUser | null>(null);
   const [email, setEmail] = useState("");
@@ -66,10 +56,7 @@ export function AuthGate({ children }: AuthGateProps) {
       }
 
       if (!supabase) {
-        if (active) {
-          setUser(localUser);
-          setLoading(false);
-        }
+        if (active) setLoading(false);
         return;
       }
 
@@ -96,7 +83,7 @@ export function AuthGate({ children }: AuthGateProps) {
       active = false;
       unsubscribe?.();
     };
-  }, [localUser]);
+  }, []);
 
   useEffect(() => {
     if (!accountOpen) return;
@@ -122,8 +109,8 @@ export function AuthGate({ children }: AuthGateProps) {
 
   const info = useMemo(() => {
     if (hasApiConfig && !hasSupabaseConfig) return `Login ativo pela API da VPS em ${apiBaseUrl}.`;
-    if (hasSupabaseConfig) return null;
-    return "Supabase desativado. Configure VITE_API_URL no arquivo .env para usar sua VPS.";
+    if (hasApiConfig) return `API detectada em ${apiBaseUrl}.`;
+    return "API da VPS nao configurada. Defina VITE_API_URL no arquivo .env.";
   }, []);
 
   async function handleSubmit(event: FormEvent) {
@@ -229,12 +216,8 @@ export function AuthGate({ children }: AuthGateProps) {
     );
   }
 
-  if (!hasSupabaseConfig) {
-    if (hasApiConfig) {
-      if (user) return children(user);
-    } else {
-      return children(localUser);
-    }
+  if (!hasSupabaseConfig && hasApiConfig) {
+    if (user) return children(user);
   }
 
   if (user) {
