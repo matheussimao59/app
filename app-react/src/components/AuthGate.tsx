@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { hasSupabaseConfig, supabase } from "../lib/supabase";
+import { hasSupabaseConfig, supabase, supabaseConfigDebug } from "../lib/supabase";
 
 type AuthUser = {
   id: string;
@@ -203,7 +203,14 @@ export function AuthGate({ children }: AuthGateProps) {
           </div>
         </div>
         <p>Acesse sua conta para continuar.</p>
-        {!hasSupabaseConfig && <p className="info">Supabase nao configurado.</p>}
+        {!hasSupabaseConfig && (
+          <div className="info">
+            <p>Supabase nao configurado.</p>
+            <p>URL carregada: {supabaseConfigDebug.hasUrl ? "sim" : "nao"}</p>
+            <p>Anon key carregada: {supabaseConfigDebug.hasAnonKey ? "sim" : "nao"}</p>
+            {supabaseConfigDebug.urlPreview && <p>Preview URL: {supabaseConfigDebug.urlPreview}</p>}
+          </div>
+        )}
         <form onSubmit={handleSubmit}>
           <label>
             E-mail
