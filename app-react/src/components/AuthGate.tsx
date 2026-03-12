@@ -1,17 +1,22 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { apiBaseUrl, hasApiConfig, hasSupabaseConfig, supabase } from "../lib/supabase";
-import { apiLogin, apiLogout, apiMe, apiRegister, clearApiToken, getApiToken, setApiToken, type ApiUser } from "../lib/api";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { hasSupabaseConfig, supabase } from "../lib/supabase";
+
+type AuthUser = {
+  id: string;
+  email: string;
+  name: string;
+  role: null;
+};
 
 interface AuthGateProps {
-  children: (user: ApiUser) => JSX.Element;
+  children: (user: AuthUser) => JSX.Element;
 }
 
 export function AuthGate({ children }: AuthGateProps) {
   const SAVED_EMAIL_KEY = "auth_saved_email";
   const REMEMBER_LOGIN_KEY = "auth_remember_login";
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<ApiUser | null>(null);
-  const [name, setName] = useState("");
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberLogin, setRememberLogin] = useState(true);
@@ -38,24 +43,6 @@ export function AuthGate({ children }: AuthGateProps) {
     let unsubscribe: (() => void) | null = null;
 
     async function boot() {
-      if (hasApiConfig && !hasSupabaseConfig) {
-        const token = getApiToken();
-        if (!token) {
-          if (active) setLoading(false);
-          return;
-        }
-        try {
-          const me = await apiMe(token);
-          if (active) setUser(me);
-        } catch {
-          clearApiToken();
-          if (active) setUser(null);
-        } finally {
-          if (active) setLoading(false);
-        }
-        return;
-      }
-
       if (!supabase) {
         if (active) setLoading(false);
         return;
@@ -108,37 +95,9 @@ export function AuthGate({ children }: AuthGateProps) {
     return () => window.removeEventListener("app-account-toggle", onAccountToggle as EventListener);
   }, []);
 
-  const info = useMemo(() => {
-    if (hasApiConfig && !hasSupabaseConfig) return `Login ativo pela API da VPS em ${apiBaseUrl}.`;
-    if (hasApiConfig) return `API detectada em ${apiBaseUrl}.`;
-    return "API da VPS nao configurada. Defina VITE_API_URL no arquivo .env.";
-  }, []);
-
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
-
-    if (hasApiConfig && !hasSupabaseConfig) {
-      try {
-        const payload = isSignUp
-          ? await apiRegister(name.trim() || email.trim(), email, password)
-          : await apiLogin(email, password);
-        setApiToken(payload.token);
-        setUser(payload.user);
-
-        if (rememberLogin) {
-          localStorage.setItem(SAVED_EMAIL_KEY, email.trim());
-          localStorage.setItem(REMEMBER_LOGIN_KEY, "1");
-        } else {
-          localStorage.removeItem(SAVED_EMAIL_KEY);
-          localStorage.setItem(REMEMBER_LOGIN_KEY, "0");
-        }
-      } catch (e) {
-        const message = e instanceof Error ? e.message : "Falha ao autenticar na API.";
-        setError(message);
-      }
-      return;
-    }
 
     if (!supabase) return;
 
@@ -167,17 +126,6 @@ export function AuthGate({ children }: AuthGateProps) {
   async function handleLogout() {
     setError(null);
     setAccountOpen(false);
-
-    if (hasApiConfig && !hasSupabaseConfig) {
-      try {
-        await apiLogout(getApiToken());
-      } catch {
-        // Limpeza local deve ocorrer mesmo se a API falhar.
-      }
-      clearApiToken();
-      setUser(null);
-      return;
-    }
 
     if (!supabase) {
       return;
@@ -212,10 +160,6 @@ export function AuthGate({ children }: AuthGateProps) {
         </div>
       </div>
     );
-  }
-
-  if (!hasSupabaseConfig && hasApiConfig) {
-    if (user) return children(user);
   }
 
   if (user) {
@@ -259,19 +203,8 @@ export function AuthGate({ children }: AuthGateProps) {
           </div>
         </div>
         <p>Acesse sua conta para continuar.</p>
-        {info && <p className="info">{info}</p>}
+        {!hasSupabaseConfig && <p className="info">Supabase nao configurado.</p>}
         <form onSubmit={handleSubmit}>
-          {isSignUp && (
-            <label>
-              Nome
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required={isSignUp}
-              />
-            </label>
-          )}
           <label>
             E-mail
             <input

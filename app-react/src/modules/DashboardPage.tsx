@@ -1,6 +1,5 @@
 ﻿import { FormEvent, useEffect, useMemo, useState } from "react";
-import { apiRequest, getApiToken } from "../lib/api";
-import { hasApiConfig, hasSupabaseConfig, supabase } from "../lib/supabase";
+import { supabase } from "../lib/supabase";
 import { UiIcon } from "../components/UiIcon";
 
 type Category = {
@@ -74,10 +73,6 @@ async function fileToDataUrl(file: File) {
     reader.onerror = () => reject(new Error("Falha ao ler arquivo."));
     reader.readAsDataURL(file);
   });
-}
-
-function currentApiToken() {
-  return getApiToken();
 }
 
 type FinanceIconId =
@@ -185,62 +180,6 @@ export function DashboardPage() {
   }
 
   async function loadAll(uid: string) {
-    if (hasApiConfig && !hasSupabaseConfig) {
-      const token = currentApiToken();
-      const data = await apiRequest<{ categories: Category[]; accounts: Account[]; transactions: FinancialTx[] }>(
-        "/financial/dashboard",
-        { token }
-      );
-
-      const catRows = (data.categories || []).map((row) => ({
-        ...row,
-        id: String(row.id),
-        user_id: String(row.user_id),
-        monthly_budget: row.monthly_budget == null ? null : Number(row.monthly_budget)
-      }));
-      setCategories(catRows);
-      setAccounts((data.accounts || []).map((a) => ({
-        ...a,
-        id: String(a.id),
-        user_id: String(a.user_id),
-        initial_balance: Number(a.initial_balance) || 0,
-        current_balance: Number(a.current_balance) || 0
-      })));
-      setTransactions((data.transactions || []).map((t) => ({
-        ...t,
-        id: String(t.id),
-        user_id: String(t.user_id),
-        category_id: t.category_id ? String(t.category_id) : null,
-        account_id: t.account_id ? String(t.account_id) : null,
-        amount: Number(t.amount) || 0
-      })));
-
-      if (catRows.length === 0) {
-        for (const row of DEFAULT_EXPENSE_CATEGORIES) {
-          await apiRequest("/financial/categories", {
-            method: "POST",
-            token,
-            body: {
-              name: row.name,
-              kind: "expense",
-              color: row.color,
-              monthly_budget: row.monthly_budget
-            }
-          });
-        }
-        const seeded = await apiRequest<{ categories: Category[] }>("/financial/categories", { token });
-        setCategories(
-          (seeded.categories || []).map((row) => ({
-            ...row,
-            id: String(row.id),
-            user_id: String(row.user_id),
-            monthly_budget: row.monthly_budget == null ? null : Number(row.monthly_budget)
-          }))
-        );
-      }
-      return;
-    }
-
     if (!supabase) return;
 
     const [catRes, accRes, txRes] = await Promise.all([
@@ -296,26 +235,6 @@ export function DashboardPage() {
     async function run() {
       setLoading(true);
       setError(null);
-
-      if (hasApiConfig && !hasSupabaseConfig) {
-        const token = currentApiToken();
-        if (!token) {
-          setError("Usuario nao autenticado.");
-          setLoading(false);
-          return;
-        }
-
-        setUserId("api");
-        try {
-          await loadAll("api");
-        } catch (e) {
-          const message = e instanceof Error ? e.message : "Falha ao carregar dados financeiros.";
-          setError(message);
-        } finally {
-          setLoading(false);
-        }
-        return;
-      }
 
       if (!supabase) {
         setError("Supabase nao configurado.");
@@ -458,59 +377,41 @@ export function DashboardPage() {
     setStatus(null);
 
     try {
-      if (hasApiConfig && !hasSupabaseConfig) {
-        await apiRequest("/financial/transactions", {
-          method: "POST",
-          token: currentApiToken(),
-          body: {
-            category_id: entryCategoryId ? Number(entryCategoryId) : null,
-            account_id: entryAccountId ? Number(entryAccountId) : null,
-            entry_type: entryType,
-            status: entryStatus,
-            description: entryDescription.trim(),
-            amount,
-            due_date: entryDueDate,
-            paid_date: entryStatus === "paid" ? entryPaidDate : null,
-            notes: null
-          }
-        });
-      } else {
-        if (!supabase) return;
-        const receiptImageData = entryReceiptFile ? await fileToDataUrl(entryReceiptFile) : null;
-        const invoiceImageData = entryInvoiceFile ? await fileToDataUrl(entryInvoiceFile) : null;
+      if (!supabase) return;
+      const receiptImageData = entryReceiptFile ? await fileToDataUrl(entryReceiptFile) : null;
+      const invoiceImageData = entryInvoiceFile ? await fileToDataUrl(entryInvoiceFile) : null;
 
-        const payload = {
-          user_id: userId,
-          category_id: entryCategoryId || null,
-          account_id: entryAccountId || null,
-          entry_type: entryType,
-          status: entryStatus,
-          description: entryDescription.trim(),
-          amount,
-          due_date: entryDueDate,
-          paid_date: entryStatus === "paid" ? entryPaidDate : null,
-          receipt_image_data: receiptImageData,
-          receipt_image_name: entryReceiptFile?.name || null,
-          invoice_image_data: invoiceImageData,
-          invoice_image_name: entryInvoiceFile?.name || null,
-          updated_at: new Date().toISOString()
-        };
+      const payload = {
+        user_id: userId,
+        category_id: entryCategoryId || null,
+        account_id: entryAccountId || null,
+        entry_type: entryType,
+        status: entryStatus,
+        description: entryDescription.trim(),
+        amount,
+        due_date: entryDueDate,
+        paid_date: entryStatus === "paid" ? entryPaidDate : null,
+        receipt_image_data: receiptImageData,
+        receipt_image_name: entryReceiptFile?.name || null,
+        invoice_image_data: invoiceImageData,
+        invoice_image_name: entryInvoiceFile?.name || null,
+        updated_at: new Date().toISOString()
+      };
 
-        const { error: txError } = await supabase.from("financial_transactions").insert(payload);
-        if (txError) throw new Error(txError.message);
+      const { error: txError } = await supabase.from("financial_transactions").insert(payload);
+      if (txError) throw new Error(txError.message);
 
-        if (entryStatus === "paid" && entryAccountId) {
-          const target = accounts.find((a) => a.id === entryAccountId);
-          if (target) {
-            const delta = entryType === "income" ? amount : -amount;
-            const nextBalance = (Number(target.current_balance) || 0) + delta;
-            const { error: accountError } = await supabase
-              .from("financial_accounts")
-              .update({ current_balance: nextBalance, updated_at: new Date().toISOString() })
-              .eq("user_id", userId)
-              .eq("id", target.id);
-            if (accountError) throw new Error(accountError.message);
-          }
+      if (entryStatus === "paid" && entryAccountId) {
+        const target = accounts.find((a) => a.id === entryAccountId);
+        if (target) {
+          const delta = entryType === "income" ? amount : -amount;
+          const nextBalance = (Number(target.current_balance) || 0) + delta;
+          const { error: accountError } = await supabase
+            .from("financial_accounts")
+            .update({ current_balance: nextBalance, updated_at: new Date().toISOString() })
+            .eq("user_id", userId)
+            .eq("id", target.id);
+          if (accountError) throw new Error(accountError.message);
         }
       }
 
@@ -543,28 +444,16 @@ export function DashboardPage() {
     setStatus(null);
 
     try {
-      if (hasApiConfig && !hasSupabaseConfig) {
-        await apiRequest("/financial/categories", {
-          method: "POST",
-          token: currentApiToken(),
-          body: {
-            name: newCategoryName.trim(),
-            kind: newCategoryKind,
-            monthly_budget: toNumber(newCategoryBudget) || null
-          }
-        });
-      } else {
-        if (!supabase) return;
-        const payload = {
-          user_id: userId,
-          name: newCategoryName.trim(),
-          kind: newCategoryKind,
-          monthly_budget: toNumber(newCategoryBudget) || null,
-          updated_at: new Date().toISOString()
-        };
-        const { error: catError } = await supabase.from("financial_categories").insert(payload);
-        if (catError) throw new Error(catError.message);
-      }
+      if (!supabase) return;
+      const payload = {
+        user_id: userId,
+        name: newCategoryName.trim(),
+        kind: newCategoryKind,
+        monthly_budget: toNumber(newCategoryBudget) || null,
+        updated_at: new Date().toISOString()
+      };
+      const { error: catError } = await supabase.from("financial_categories").insert(payload);
+      if (catError) throw new Error(catError.message);
 
       setNewCategoryName("");
       setNewCategoryBudget("");
@@ -589,29 +478,17 @@ export function DashboardPage() {
 
     try {
       const startBalance = toNumber(newAccountBalance);
-      if (hasApiConfig && !hasSupabaseConfig) {
-        await apiRequest("/financial/accounts", {
-          method: "POST",
-          token: currentApiToken(),
-          body: {
-            name: newAccountName.trim(),
-            bank: newAccountBank.trim() || null,
-            initial_balance: startBalance
-          }
-        });
-      } else {
-        if (!supabase) return;
-        const payload = {
-          user_id: userId,
-          name: newAccountName.trim(),
-          bank: newAccountBank.trim() || null,
-          initial_balance: startBalance,
-          current_balance: startBalance,
-          updated_at: new Date().toISOString()
-        };
-        const { error: accError } = await supabase.from("financial_accounts").insert(payload);
-        if (accError) throw new Error(accError.message);
-      }
+      if (!supabase) return;
+      const payload = {
+        user_id: userId,
+        name: newAccountName.trim(),
+        bank: newAccountBank.trim() || null,
+        initial_balance: startBalance,
+        current_balance: startBalance,
+        updated_at: new Date().toISOString()
+      };
+      const { error: accError } = await supabase.from("financial_accounts").insert(payload);
+      if (accError) throw new Error(accError.message);
 
       setNewAccountName("");
       setNewAccountBank("");
@@ -636,20 +513,13 @@ export function DashboardPage() {
     setStatus(null);
 
     try {
-      if (hasApiConfig && !hasSupabaseConfig) {
-        await apiRequest(`/financial/categories/${categoryId}`, {
-          method: "DELETE",
-          token: currentApiToken()
-        });
-      } else {
-        if (!supabase) return;
-        const { error: delError } = await supabase
-          .from("financial_categories")
-          .delete()
-          .eq("user_id", userId)
-          .eq("id", categoryId);
-        if (delError) throw new Error(delError.message);
-      }
+      if (!supabase) return;
+      const { error: delError } = await supabase
+        .from("financial_categories")
+        .delete()
+        .eq("user_id", userId)
+        .eq("id", categoryId);
+      if (delError) throw new Error(delError.message);
       setStatus("Categoria excluida.");
       await refresh();
     } catch (e) {
